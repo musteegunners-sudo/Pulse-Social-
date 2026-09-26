@@ -1,0 +1,6 @@
+{
+  "name": "PulseSocial - Multi-Platform Social Manager & Analytics",
+  "description": "Comprehensive social media management platform to schedule posts, manage cross-network content queues, and track unified performance analytics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

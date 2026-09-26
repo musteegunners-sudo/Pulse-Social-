@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">PulseSocial</string>
+    <string name="title_activity_main">PulseSocial</string>
+    <string name="package_name">com.pulsesocial.app</string>
+    <string name="custom_url_scheme">com.pulsesocial.app</string>
+</resources>

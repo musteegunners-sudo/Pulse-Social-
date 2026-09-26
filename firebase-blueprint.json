@@ -1,0 +1,111 @@
+{
+  "entities": {
+    "users": {
+      "title": "User Profile",
+      "description": "User account information and profile details",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth User UID"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "User email address"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "User display name"
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "Profile photo URL"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Account registration ISO timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last updated ISO timestamp"
+        }
+      },
+      "required": ["uid", "email", "createdAt"]
+    },
+    "channels": {
+      "title": "Connected Social Channel",
+      "description": "Authorized third-party social media profile and OAuth connection status",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "platform": { "type": "string", "enum": ["twitter", "linkedin", "instagram", "facebook", "tiktok", "whatsapp"] },
+        "name": { "type": "string" },
+        "handle": { "type": "string" },
+        "avatarUrl": { "type": "string" },
+        "followersCount": { "type": "number" },
+        "isConnected": { "type": "boolean" },
+        "lastSyncedAt": { "type": "string" },
+        "oauthScopes": { "type": "array", "items": { "type": "string" } },
+        "appUrl": { "type": "string" },
+        "deepLink": { "type": "string" }
+      },
+      "required": ["id", "platform", "handle", "isConnected"]
+    },
+    "whatsappChats": {
+      "title": "WhatsApp Direct Message Conversation",
+      "description": "Direct message thread with a contact or customer over WhatsApp",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "contactName": { "type": "string" },
+        "phoneNumber": { "type": "string" },
+        "avatarUrl": { "type": "string" },
+        "lastMessage": { "type": "string" },
+        "lastMessageTimestamp": { "type": "string" },
+        "unreadCount": { "type": "number" },
+        "isPinned": { "type": "boolean" },
+        "isOnline": { "type": "boolean" },
+        "category": { "type": "string", "enum": ["customer", "lead", "partner", "personal"] }
+      },
+      "required": ["id", "contactName", "phoneNumber"]
+    },
+    "whatsappStatuses": {
+      "title": "WhatsApp Status Update",
+      "description": "24-hour disappearing WhatsApp status story or update",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string", "enum": ["text", "image"] },
+        "content": { "type": "string" },
+        "mediaUrl": { "type": "string" },
+        "bgColor": { "type": "string" },
+        "fontStyle": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "expiresAt": { "type": "string" },
+        "viewsCount": { "type": "number" }
+      },
+      "required": ["id", "type", "createdAt", "expiresAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "users",
+      "description": "Stores user profiles where document ID matches the user auth UID"
+    },
+    "/users/{userId}/channels/{channelId}": {
+      "schema": "channels",
+      "description": "Authorized social network channels connected by the user"
+    },
+    "/users/{userId}/whatsapp_chats/{chatId}": {
+      "schema": "whatsappChats",
+      "description": "Direct WhatsApp chats and customer conversations"
+    },
+    "/users/{userId}/whatsapp_statuses/{statusId}": {
+      "schema": "whatsappStatuses",
+      "description": "24-hour status updates and stories for WhatsApp"
+    }
+  }
+}
