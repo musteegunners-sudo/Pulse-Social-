@@ -188,22 +188,27 @@ export default function App() {
           }
           return [saved, ...prev];
         });
-      } else {
-        const updated = storageService.savePost(newPost);
-        setPosts(updated);
-      }
 
-      if (newPost.status === 'published') {
-        showToast('Post created! Opening channel dispatcher...');
-        setDispatcherPost(newPost);
-      } else {
-        showToast(newPost.status === 'scheduled' ? 'Post scheduled successfully!' : 'Post saved as draft.');
+        if (newPost.status === 'published') {
+          showToast('Post created! Opening channel dispatcher...');
+          setDispatcherPost(newPost);
+        } else {
+          showToast(newPost.status === 'scheduled' ? 'Post scheduled successfully!' : 'Post saved as draft.');
+        }
+        return;
       }
     } catch (error) {
       console.warn('API savePost failed, using local storage fallback:', error);
-      const updated = storageService.savePost(newPost);
-      setPosts(updated);
-      showToast('Saved locally while server sync is unavailable.');
+    }
+
+    const updated = storageService.savePost(newPost);
+    setPosts(updated);
+
+    if (newPost.status === 'published') {
+      showToast('Post created! Opening channel dispatcher...');
+      setDispatcherPost(newPost);
+    } else {
+      showToast(newPost.status === 'scheduled' ? 'Post scheduled successfully!' : 'Post saved as draft.');
     }
   };
 
@@ -212,16 +217,16 @@ export default function App() {
       if (hasAuthToken()) {
         await apiService.deletePost(id);
         setPosts((prev) => prev.filter((p) => p.id !== id));
-      } else {
-        const updated = storageService.deletePost(id);
-        setPosts(updated);
+        showToast('Post removed from schedule.');
+        return;
       }
-      showToast('Post removed from schedule.');
     } catch (error) {
-      const updated = storageService.deletePost(id);
-      setPosts(updated);
-      showToast('Post removed locally.');
+      console.warn('API deletePost failed, using local storage fallback:', error);
     }
+
+    const updated = storageService.deletePost(id);
+    setPosts(updated);
+    showToast('Post removed from schedule.');
   };
 
   const handlePublishNow = (post: SocialPost) => {
@@ -254,8 +259,31 @@ export default function App() {
         engagementRate: Number((4.5 + Math.random() * 3).toFixed(2)),
       }
     };
-    const updated = storageService.savePost(publishedPost);
-    setPosts(updated);
+
+    const persistPost = async () => {
+      try {
+        if (hasAuthToken()) {
+          const saved = await apiService.savePost(publishedPost);
+          setPosts((prev) => {
+            const index = prev.findIndex((p) => p.id === saved.id);
+            if (index >= 0) {
+              const next = [...prev];
+              next[index] = saved;
+              return next;
+            }
+            return [saved, ...prev];
+          });
+          return;
+        }
+      } catch (error) {
+        console.warn('API publish fallback triggered:', error);
+      }
+
+      const updated = storageService.savePost(publishedPost);
+      setPosts(updated);
+    };
+
+    persistPost();
     setDispatcherPost(publishedPost);
     const channelNames = targetAccounts.map(a => a.name).join(', ');
     showToast(channelNames ? `🎉 Staged to ${targetAccounts.length} channel(s): ${channelNames}!` : '🎉 Staged to target networks!');
@@ -277,22 +305,23 @@ export default function App() {
 
   const handleToggleAccount = async (id: string) => {
     const target = accounts.find((a) => a.id === id);
-    const nextState = target ? !target.isConnected : false;
+    if (!target) return;
+    const nextState = !target.isConnected;
 
     try {
       if (hasAuthToken()) {
-        const updated = await apiService.saveAccount({ ...target, isConnected: nextState } as SocialAccount);
-        setAccounts((prev) => prev.map((a) => a.id === id ? updated : a));
-      } else {
-        const updated = storageService.toggleAccountConnection(id, activeUid);
-        setAccounts(updated);
+        const saved = await apiService.saveAccount({ ...target, isConnected: nextState } as SocialAccount);
+        setAccounts((prev) => prev.map((a) => a.id === id ? saved : a));
+        showToast(target.isConnected ? `${target.handle} is active and saved on app.` : `${target.handle} paused.`);
+        return;
       }
-      showToast(target?.isConnected ? `${target.handle} is active and saved on app.` : `${target?.handle} paused.`);
     } catch (error) {
-      const updated = storageService.toggleAccountConnection(id, activeUid);
-      setAccounts(updated);
-      showToast('Stored locally while server sync is unavailable.');
+      console.warn('API toggleAccount failed, using local storage fallback:', error);
     }
+
+    const updated = storageService.toggleAccountConnection(id, activeUid);
+    setAccounts(updated);
+    showToast(target.isConnected ? `${target.handle} is active and saved on app.` : `${target.handle} paused.`);
   };
 
   const handleAddAccount = async (acc: SocialAccount) => {
@@ -300,16 +329,16 @@ export default function App() {
       if (hasAuthToken()) {
         const saved = await apiService.saveAccount(acc);
         setAccounts((prev) => [saved, ...prev.filter((a) => a.id !== saved.id)]);
-      } else {
-        const updated = storageService.addAccount(acc, activeUid);
-        setAccounts(updated);
+        showToast(`Connected ${acc.handle} — saved on app & ready.`);
+        return;
       }
-      showToast(`Connected ${acc.handle} — saved on app & ready.`);
     } catch (error) {
-      const updated = storageService.addAccount(acc, activeUid);
-      setAccounts(updated);
-      showToast(`Connected ${acc.handle} locally.`);
+      console.warn('API addAccount failed, using local storage fallback:', error);
     }
+
+    const updated = storageService.addAccount(acc, activeUid);
+    setAccounts(updated);
+    showToast(`Connected ${acc.handle} locally.`);
   };
 
   const handleSaveAccount = async (acc: SocialAccount) => {
@@ -325,16 +354,16 @@ export default function App() {
           }
           return [saved, ...prev];
         });
-      } else {
-        const updated = storageService.saveAccount(acc, activeUid);
-        setAccounts(updated);
+        showToast(`Saved changes for ${acc.handle} to app.`);
+        return;
       }
-      showToast(`Saved changes for ${acc.handle} to app.`);
     } catch (error) {
-      const updated = storageService.saveAccount(acc, activeUid);
-      setAccounts(updated);
-      showToast(`Saved changes for ${acc.handle} locally.`);
+      console.warn('API saveAccount failed, using local storage fallback:', error);
     }
+
+    const updated = storageService.saveAccount(acc, activeUid);
+    setAccounts(updated);
+    showToast(`Saved changes for ${acc.handle} locally.`);
   };
 
   const handleDeleteAccount = async (id: string) => {
@@ -343,16 +372,16 @@ export default function App() {
       if (hasAuthToken()) {
         await apiService.deleteAccount(id);
         setAccounts((prev) => prev.filter((a) => a.id !== id));
-      } else {
-        const updated = storageService.deleteAccount(id, activeUid);
-        setAccounts(updated);
+        showToast(`Removed ${target?.handle || 'account'} from PulseSocial.`);
+        return;
       }
-      showToast(`Removed ${target?.handle || 'account'} from PulseSocial.`);
     } catch (error) {
-      const updated = storageService.deleteAccount(id, activeUid);
-      setAccounts(updated);
-      showToast(`Removed ${target?.handle || 'account'} locally.`);
+      console.warn('API deleteAccount failed, using local storage fallback:', error);
     }
+
+    const updated = storageService.deleteAccount(id, activeUid);
+    setAccounts(updated);
+    showToast(`Removed ${target?.handle || 'account'} locally.`);
   };
 
   const handleClearAccounts = () => {
@@ -688,93 +717,6 @@ export default function App() {
     </div>
   );
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
