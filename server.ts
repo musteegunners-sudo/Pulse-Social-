@@ -24,6 +24,41 @@ const PORT = cliPort || (process.env.APP_PORT ? Number(process.env.APP_PORT) : 3
 app.use(express.json());
 app.use(passport.initialize());
 
+const jsonArray = (value: string | null) => {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const jsonObject = (value: string | null) => {
+  if (!value) return undefined;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+};
+
+const serializePost = (post: any) => ({
+  ...post,
+  platforms: jsonArray(post.platforms),
+  performance: jsonObject(post.performance),
+  deliveryReceipts: jsonArray(post.deliveryReceipts),
+  reachedChannels: jsonArray(post.reachedChannels),
+  mediaUrls: jsonArray(post.mediaUrls),
+  tags: jsonArray(post.tags),
+  targetAccountIds: jsonArray(post.targetAccountIds),
+});
+
+const serializeAccount = (account: any) => ({
+  ...account,
+  oauthScopes: jsonArray(account.oauthScopes),
+});
+
 // -------------------------------------------------------------
 // Auth routes
 // -------------------------------------------------------------
@@ -105,6 +140,200 @@ app.get('/api/auth/me', authenticate, async (req, res) => {
       createdAt: user.createdAt,
     },
   });
+});
+
+// -------------------------------------------------------------
+// User data API routes
+// -------------------------------------------------------------
+app.get('/api/posts', authenticate, async (req, res) => {
+  try {
+    const userId = (req.user as any).id;
+    const posts = await prisma.socialPost.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return res.json(posts.map(serializePost));
+  } catch (error: any) {
+    console.error('Get posts error:', error);
+    return res.status(500).json({ error: error.message || 'Failed to load posts.' });
+  }
+});
+
+app.post('/api/posts', authenticate, async (req, res) => {
+  try {
+    const userId = (req.user as any).id;
+    const { content, platforms = [], targetAccountIds = [], scheduledFor, status = 'draft', mediaUrls = [], firstComment, tags = [] } = req.body;
+
+    if (!content || typeof content !== 'string' || !content.trim()) {
+      return res.status(400).json({ error: 'Post content is required.' });
+    }
+
+    const post = await prisma.socialPost.create({
+      data: {
+        userId,
+        content: content.trim(),
+        platforms: JSON.stringify(Array.isArray(platforms) ? platforms : []),
+        targetAccountIds: JSON.stringify(Array.isArray(targetAccountIds) ? targetAccountIds : []),
+        scheduledFor: scheduledFor ? new Date(scheduledFor) : null,
+        status,
+        mediaUrls: JSON.stringify(Array.isArray(mediaUrls) ? mediaUrls : []),
+        firstComment: firstComment || null,
+        tags: JSON.stringify(Array.isArray(tags) ? tags : []),
+      },
+    });
+
+    return res.status(201).json(serializePost(post));
+  } catch (error: any) {
+    console.error('Create post error:', error);
+    return res.status(500).json({ error: error.message || 'Failed to create post.' });
+  }
+});
+
+app.put('/api/posts/:id', authenticate, async (req, res) => {
+  try {
+    const userId = (req.user as any).id;
+    const { id } = req.params;
+    const existing = await prisma.socialPost.findFirst({ where: { id, userId } });
+    if (!existing) {
+      return res.status(404).json({ error: 'Post not found.' });
+    }
+
+    const updates = {
+      ...(req.body.content !== undefined && { content: String(req.body.content).trim() }),
+      ...(req.body.platforms !== undefined && { platforms: JSON.stringify(req.body.platforms || []) }),
+      ...(req.body.targetAccountIds !== undefined && { targetAccountIds: JSON.stringify(req.body.targetAccountIds || []) }),
+      ...(req.body.scheduledFor !== undefined && { scheduledFor: req.body.scheduledFor ? new Date(req.body.scheduledFor) : null }),
+      ...(req.body.status !== undefined && { status: req.body.status }),
+      ...(req.body.mediaUrls !== undefined && { mediaUrls: JSON.stringify(req.body.mediaUrls || []) }),
+      ...(req.body.firstComment !== undefined && { firstComment: req.body.firstComment || null }),
+      ...(req.body.tags !== undefined && { tags: JSON.stringify(req.body.tags || []) }),
+    };
+
+    const post = await prisma.socialPost.update({
+      where: { id },
+      data: updates,
+    });
+
+    return res.json(serializePost(post));
+  } catch (error: any) {
+    console.error('Update post error:', error);
+    return res.status(500).json({ error: error.message || 'Failed to update post.' });
+  }
+});
+
+app.delete('/api/posts/:id', authenticate, async (req, res) => {
+  try {
+    const userId = (req.user as any).id;
+    const { id } = req.params;
+    const existing = await prisma.socialPost.findFirst({ where: { id, userId } });
+    if (!existing) {
+      return res.status(404).json({ error: 'Post not found.' });
+    }
+
+    await prisma.socialPost.delete({ where: { id } });
+    return res.json({ success: true, id });
+  } catch (error: any) {
+    console.error('Delete post error:', error);
+    return res.status(500).json({ error: error.message || 'Failed to delete post.' });
+  }
+});
+
+app.get('/api/accounts', authenticate, async (req, res) => {
+  try {
+    const userId = (req.user as any).id;
+    const accounts = await prisma.socialAccount.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return res.json(accounts.map(serializeAccount));
+  } catch (error: any) {
+    console.error('Get accounts error:', error);
+    return res.status(500).json({ error: error.message || 'Failed to load connected accounts.' });
+  }
+});
+
+app.post('/api/accounts', authenticate, async (req, res) => {
+  try {
+    const userId = (req.user as any).id;
+    const { platform, handle, name, avatarUrl, followersCount, isConnected = true, oauthScopes = [], appUrl, deepLink } = req.body;
+
+    if (!platform || !handle) {
+      return res.status(400).json({ error: 'Platform and handle are required.' });
+    }
+
+    const account = await prisma.socialAccount.create({
+      data: {
+        userId,
+        platform: String(platform),
+        handle: String(handle),
+        accessToken: req.body.accessToken || '',
+        refreshToken: req.body.refreshToken || null,
+        isConnected: Boolean(isConnected),
+        followersCount: Number(followersCount || 0),
+        avatarUrl: avatarUrl || null,
+        name: name || String(handle),
+      },
+    });
+
+    return res.status(201).json(serializeAccount({
+      ...account,
+      oauthScopes: Array.isArray(oauthScopes) ? oauthScopes : [],
+      appUrl,
+      deepLink,
+    }));
+  } catch (error: any) {
+    console.error('Create account error:', error);
+    return res.status(500).json({ error: error.message || 'Failed to connect account.' });
+  }
+});
+
+app.put('/api/accounts/:id', authenticate, async (req, res) => {
+  try {
+    const userId = (req.user as any).id;
+    const { id } = req.params;
+    const existing = await prisma.socialAccount.findFirst({ where: { id, userId } });
+    if (!existing) {
+      return res.status(404).json({ error: 'Account not found.' });
+    }
+
+    const updates: any = {};
+    if (req.body.platform !== undefined) updates.platform = String(req.body.platform);
+    if (req.body.handle !== undefined) updates.handle = String(req.body.handle);
+    if (req.body.avatarUrl !== undefined) updates.avatarUrl = req.body.avatarUrl || null;
+    if (req.body.followersCount !== undefined) updates.followersCount = Number(req.body.followersCount || 0);
+    if (req.body.isConnected !== undefined) updates.isConnected = Boolean(req.body.isConnected);
+    if (req.body.accessToken !== undefined) updates.accessToken = String(req.body.accessToken || '');
+    if (req.body.refreshToken !== undefined) updates.refreshToken = req.body.refreshToken || null;
+
+    const account = await prisma.socialAccount.update({
+      where: { id },
+      data: updates,
+    });
+
+    return res.json(serializeAccount(account));
+  } catch (error: any) {
+    console.error('Update account error:', error);
+    return res.status(500).json({ error: error.message || 'Failed to update account.' });
+  }
+});
+
+app.delete('/api/accounts/:id', authenticate, async (req, res) => {
+  try {
+    const userId = (req.user as any).id;
+    const { id } = req.params;
+    const existing = await prisma.socialAccount.findFirst({ where: { id, userId } });
+    if (!existing) {
+      return res.status(404).json({ error: 'Account not found.' });
+    }
+
+    await prisma.socialAccount.delete({ where: { id } });
+    return res.json({ success: true, id });
+  } catch (error: any) {
+    console.error('Delete account error:', error);
+    return res.status(500).json({ error: error.message || 'Failed to disconnect account.' });
+  }
 });
 
 // -------------------------------------------------------------
@@ -837,3 +1066,7 @@ setupViteOrStatic().catch((err) => {
   console.error('Failed to start server:', err);
   process.exit(1);
 });
+
+
+
+
