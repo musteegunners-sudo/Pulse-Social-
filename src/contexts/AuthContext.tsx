@@ -210,6 +210,24 @@ function getStoredSession(): UserProfile | null {
   }
 }
 
+function persistApiSession(token: string, user: { id: string; email: string; name: string; createdAt?: string }) {
+  localStorage.setItem('auth_token', token);
+  const profile: UserProfile = {
+    uid: user.id,
+    email: user.email,
+    displayName: user.name,
+    photoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+    provider: 'email',
+    handle: `@${user.email.split('@')[0]}`,
+    connectedSocials: ['email'],
+    createdAt: user.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(profile));
+  return profile;
+}
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('auth_token'));
   const [user, setUser] = useState<User | null>(null);
@@ -232,12 +250,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .then(data => {
           if (data?.user) {
             setToken(savedToken);
+            const profileFromApi = persistApiSession(savedToken, data.user);
+            setProfile(profileFromApi);
           } else {
             localStorage.removeItem('auth_token');
             setToken(null);
+            setProfile(null);
           }
         })
-        .catch(() => {});
+        .catch(() => {}
+      );
     }
   }, []);
 
@@ -255,20 +277,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const data = await res.json();
     setToken(data.token);
-    localStorage.setItem('auth_token', data.token);
-
-    if (data.user) {
-      saveActiveSession({
-        uid: data.user.id,
-        email: data.user.email,
-        displayName: data.user.name,
-        photoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
-        provider: 'email',
-        handle: `@${data.user.email.split('@')[0]}`,
-        connectedSocials: ['email'],
-        createdAt: data.user.createdAt || new Date().toISOString(),
-      });
-    }
+    const sessionProfile = persistApiSession(data.token, data.user);
+    setProfile(sessionProfile);
+    closeAuthModal();
   };
 
   const register = async (email: string, name: string, password: string) => {
@@ -285,20 +296,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const data = await res.json();
     setToken(data.token);
-    localStorage.setItem('auth_token', data.token);
-
-    if (data.user) {
-      saveActiveSession({
-        uid: data.user.id,
-        email: data.user.email,
-        displayName: data.user.name,
-        photoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
-        provider: 'email',
-        handle: `@${data.user.email.split('@')[0]}`,
-        connectedSocials: ['email'],
-        createdAt: data.user.createdAt || new Date().toISOString(),
-      });
-    }
+    const sessionProfile = persistApiSession(data.token, data.user);
+    setProfile(sessionProfile);
+    closeAuthModal();
   };
 
   // Security Verification state
@@ -540,6 +540,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     try {
+      const backendResponse = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: normalizedEmail, name: trimmedName, password: pass }),
+      });
+
+      const backendData = await backendResponse.json().catch(() => ({}));
+      if (backendResponse.ok && backendData?.token && backendData?.user) {
+        const sessionProfile = persistApiSession(backendData.token, backendData.user);
+        setToken(backendData.token);
+        setProfile(sessionProfile);
+        setPendingRegisterData(null);
+        closeAuthModal();
+        return;
+      }
+
+      if (!backendResponse.ok && backendData?.error) {
+        throw new Error(backendData.error);
+      }
+    } catch (backendErr: any) {
+      console.warn('Backend registration failed, falling back to legacy provider flow:', backendErr);
+    }
+
+    try {
       // Step 2: Once verified, commit the account to Firebase Auth / app database
       const cred = await createUserWithEmailAndPassword(auth, normalizedEmail, pass);
       if (trimmedName) {
@@ -625,6 +649,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const loginWithEmail = async (email: string, pass: string) => {
     const normalizedEmail = email.trim().toLowerCase();
+
+    try {
+      const backendResponse = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: normalizedEmail, password: pass }),
+      });
+
+      const backendData = await backendResponse.json().catch(() => ({}));
+      if (backendResponse.ok && backendData?.token && backendData?.user) {
+        setToken(backendData.token);
+        const sessionProfile = persistApiSession(backendData.token, backendData.user);
+        setProfile(sessionProfile);
+        closeAuthModal();
+        return;
+      }
+
+      if (!backendResponse.ok && backendData?.error) {
+        throw new Error(backendData.error);
+      }
+    } catch (backendErr: any) {
+      console.warn('Backend login failed, falling back to legacy provider flow:', backendErr);
+    }
 
     try {
       // 1. Try native Firebase Auth sign in
