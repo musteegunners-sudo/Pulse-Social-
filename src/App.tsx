@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { SocialPost, SocialAccount, QueueSlot, InboxItem } from './types';
 import { storageService } from './services/storageService';
+import apiService from './services/apiService';
 import { Sidebar, NavTab } from './components/layout/Sidebar';
 import { Header } from './components/layout/Header';
 import { OverviewDashboard } from './components/dashboard/OverviewDashboard';
@@ -59,17 +60,38 @@ export default function App() {
 
   const activeUid = user?.uid || profile?.uid;
 
-  // Load initial data from localStorage
-  useEffect(() => {
+  const hasAuthToken = () => !!localStorage.getItem('auth_token');
+
+  const loadUserData = async () => {
+    try {
+      if (hasAuthToken()) {
+        const [serverPosts, serverAccounts] = await Promise.all([
+          apiService.getPosts().catch(() => storageService.getPosts()),
+          apiService.getAccounts().catch(() => storageService.getAccounts()),
+        ]);
+
+        setPosts(serverPosts);
+        setAccounts(serverAccounts);
+        return;
+      }
+    } catch (error) {
+      console.warn('Falling back to local data store:', error);
+    }
+
     setPosts(storageService.getPosts());
     setAccounts(storageService.getAccounts());
+  };
+
+  // Load initial data from backend when authenticated, otherwise localStorage.
+  useEffect(() => {
     setQueueSlots(storageService.getQueueSlots());
     setInboxItems(storageService.getInbox());
-  }, []);
+    loadUserData();
+  }, [user?.uid, profile?.uid]);
 
   // Sync saved accounts with Firestore when user is authenticated
   useEffect(() => {
-    if (activeUid) {
+    if (activeUid && hasAuthToken()) {
       storageService.syncAccountsWithFirestore(activeUid).then((synced) => {
         setAccounts(synced);
       }).catch((e) => {
@@ -131,7 +153,15 @@ export default function App() {
             };
             updated = [...prev, newAcc];
           }
-          storageService.saveAccounts(updated, user?.uid);
+
+          if (hasAuthToken()) {
+            apiService.saveAccount(updated[updated.length - 1] || exists || updated[0]).catch(() => {
+              storageService.saveAccounts(updated, user?.uid);
+            });
+          } else {
+            storageService.saveAccounts(updated, user?.uid);
+          }
+
           return updated;
         });
       }
@@ -145,21 +175,53 @@ export default function App() {
     setIsComposerOpen(true);
   };
 
-  const handleSavePost = (newPost: SocialPost) => {
-    const updated = storageService.savePost(newPost);
-    setPosts(updated);
-    if (newPost.status === 'published') {
-      showToast('Post created! Opening channel dispatcher...');
-      setDispatcherPost(newPost);
-    } else {
-      showToast(newPost.status === 'scheduled' ? 'Post scheduled successfully!' : 'Post saved as draft.');
+  const handleSavePost = async (newPost: SocialPost) => {
+    try {
+      if (hasAuthToken()) {
+        const saved = await apiService.savePost(newPost);
+        setPosts((prev) => {
+          const index = prev.findIndex((p) => p.id === saved.id);
+          if (index >= 0) {
+            const next = [...prev];
+            next[index] = saved;
+            return next;
+          }
+          return [saved, ...prev];
+        });
+      } else {
+        const updated = storageService.savePost(newPost);
+        setPosts(updated);
+      }
+
+      if (newPost.status === 'published') {
+        showToast('Post created! Opening channel dispatcher...');
+        setDispatcherPost(newPost);
+      } else {
+        showToast(newPost.status === 'scheduled' ? 'Post scheduled successfully!' : 'Post saved as draft.');
+      }
+    } catch (error) {
+      console.warn('API savePost failed, using local storage fallback:', error);
+      const updated = storageService.savePost(newPost);
+      setPosts(updated);
+      showToast('Saved locally while server sync is unavailable.');
     }
   };
 
-  const handleDeletePost = (id: string) => {
-    const updated = storageService.deletePost(id);
-    setPosts(updated);
-    showToast('Post removed from schedule.');
+  const handleDeletePost = async (id: string) => {
+    try {
+      if (hasAuthToken()) {
+        await apiService.deletePost(id);
+        setPosts((prev) => prev.filter((p) => p.id !== id));
+      } else {
+        const updated = storageService.deletePost(id);
+        setPosts(updated);
+      }
+      showToast('Post removed from schedule.');
+    } catch (error) {
+      const updated = storageService.deletePost(id);
+      setPosts(updated);
+      showToast('Post removed locally.');
+    }
   };
 
   const handlePublishNow = (post: SocialPost) => {
@@ -213,30 +275,84 @@ export default function App() {
     setIsComposerOpen(true);
   };
 
-  const handleToggleAccount = (id: string) => {
-    const updated = storageService.toggleAccountConnection(id, activeUid);
-    setAccounts(updated);
-    const target = updated.find(a => a.id === id);
-    showToast(target?.isConnected ? `${target.handle} is active and saved on app.` : `${target?.handle} paused.`);
+  const handleToggleAccount = async (id: string) => {
+    const target = accounts.find((a) => a.id === id);
+    const nextState = target ? !target.isConnected : false;
+
+    try {
+      if (hasAuthToken()) {
+        const updated = await apiService.saveAccount({ ...target, isConnected: nextState } as SocialAccount);
+        setAccounts((prev) => prev.map((a) => a.id === id ? updated : a));
+      } else {
+        const updated = storageService.toggleAccountConnection(id, activeUid);
+        setAccounts(updated);
+      }
+      showToast(target?.isConnected ? `${target.handle} is active and saved on app.` : `${target?.handle} paused.`);
+    } catch (error) {
+      const updated = storageService.toggleAccountConnection(id, activeUid);
+      setAccounts(updated);
+      showToast('Stored locally while server sync is unavailable.');
+    }
   };
 
-  const handleAddAccount = (acc: SocialAccount) => {
-    const updated = storageService.addAccount(acc, activeUid);
-    setAccounts(updated);
-    showToast(`Connected ${acc.handle} — saved on app & ready.`);
+  const handleAddAccount = async (acc: SocialAccount) => {
+    try {
+      if (hasAuthToken()) {
+        const saved = await apiService.saveAccount(acc);
+        setAccounts((prev) => [saved, ...prev.filter((a) => a.id !== saved.id)]);
+      } else {
+        const updated = storageService.addAccount(acc, activeUid);
+        setAccounts(updated);
+      }
+      showToast(`Connected ${acc.handle} — saved on app & ready.`);
+    } catch (error) {
+      const updated = storageService.addAccount(acc, activeUid);
+      setAccounts(updated);
+      showToast(`Connected ${acc.handle} locally.`);
+    }
   };
 
-  const handleSaveAccount = (acc: SocialAccount) => {
-    const updated = storageService.saveAccount(acc, activeUid);
-    setAccounts(updated);
-    showToast(`Saved changes for ${acc.handle} to app.`);
+  const handleSaveAccount = async (acc: SocialAccount) => {
+    try {
+      if (hasAuthToken()) {
+        const saved = await apiService.saveAccount(acc);
+        setAccounts((prev) => {
+          const index = prev.findIndex((a) => a.id === saved.id);
+          if (index >= 0) {
+            const next = [...prev];
+            next[index] = saved;
+            return next;
+          }
+          return [saved, ...prev];
+        });
+      } else {
+        const updated = storageService.saveAccount(acc, activeUid);
+        setAccounts(updated);
+      }
+      showToast(`Saved changes for ${acc.handle} to app.`);
+    } catch (error) {
+      const updated = storageService.saveAccount(acc, activeUid);
+      setAccounts(updated);
+      showToast(`Saved changes for ${acc.handle} locally.`);
+    }
   };
 
-  const handleDeleteAccount = (id: string) => {
-    const target = accounts.find(a => a.id === id);
-    const updated = storageService.deleteAccount(id, activeUid);
-    setAccounts(updated);
-    showToast(`Removed ${target?.handle || 'account'} from PulseSocial.`);
+  const handleDeleteAccount = async (id: string) => {
+    const target = accounts.find((a) => a.id === id);
+    try {
+      if (hasAuthToken()) {
+        await apiService.deleteAccount(id);
+        setAccounts((prev) => prev.filter((a) => a.id !== id));
+      } else {
+        const updated = storageService.deleteAccount(id, activeUid);
+        setAccounts(updated);
+      }
+      showToast(`Removed ${target?.handle || 'account'} from PulseSocial.`);
+    } catch (error) {
+      const updated = storageService.deleteAccount(id, activeUid);
+      setAccounts(updated);
+      showToast(`Removed ${target?.handle || 'account'} locally.`);
+    }
   };
 
   const handleClearAccounts = () => {
@@ -370,10 +486,9 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden">
-      
       {/* Toast Notification */}
       {toastMessage && (
-        <div className="fixed bottom-5 right-5 z-50 bg-slate-900 text-white text-xs px-4 py-2.5 rounded-lg shadow-xl flex items-center gap-2 border border-slate-700 animate-in fade-in slide-in-from-bottom-2 duration-200">
+        <div className="fixed bottom-5 right-5 z-50 bg-slate-900 text-white text-xs px-4 py-2.5 rounded-lg shadow-xl flex items-center gap-2 border border-slate-700 animate-in fade-in slide-in-from-bottom-4">
           <span className="w-2 h-2 rounded-full bg-emerald-400" />
           <span>{toastMessage}</span>
         </div>
@@ -570,7 +685,267 @@ export default function App() {
 
       {/* Security & Verification Modal (Email & SMS Phone 2FA) */}
       <SecurityModal />
-
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
