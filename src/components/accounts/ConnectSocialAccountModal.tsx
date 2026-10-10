@@ -12,7 +12,9 @@ import {
   Check,
   Send,
   Sparkles,
-  Link as LinkIcon
+  Link as LinkIcon,
+  Users,
+  Building2
 } from 'lucide-react';
 import { SocialAccount, SocialPlatform } from '../../types';
 import { PlatformIcon, getPlatformName } from '../common/PlatformIcon';
@@ -32,6 +34,7 @@ export const ConnectSocialAccountModal: React.FC<ConnectSocialAccountModalProps>
   initialPlatform = 'twitter',
 }) => {
   const [selectedPlatform, setSelectedPlatform] = useState<SocialPlatform>(initialPlatform);
+  const [facebookType, setFacebookType] = useState<'page' | 'group' | 'profile'>('page');
   const [handleInput, setHandleInput] = useState('');
   const [channelName, setChannelName] = useState('');
   const [audienceCount, setAudienceCount] = useState<number>(12000);
@@ -173,11 +176,24 @@ export const ConnectSocialAccountModal: React.FC<ConnectSocialAccountModalProps>
       .replace(/^@/, '')
       .trim();
 
-    const cleanHandle = `@${activeRawHandle}`;
-    const cleanName = channelName.trim() || verifiedData?.name || activeRawHandle.replace(/[._-]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-    const canonicalUrl = verifiedData?.canonicalUrl || config.webProfileGenerator(activeRawHandle);
-    const deepLink = verifiedData?.deepLink || config.deepLinkGenerator(activeRawHandle);
-    const avatarUrl = verifiedData?.avatarUrl || `https://unavatar.io/${selectedPlatform}/${activeRawHandle}?fallback=https://ui-avatars.com/api/?name=${encodeURIComponent(activeRawHandle)}&background=4f46e5&color=fff`;
+    const isFbGroup = selectedPlatform === 'facebook' && (facebookType === 'group' || raw.includes('/groups/') || raw.startsWith('groups/'));
+    const isFbPage = selectedPlatform === 'facebook' && facebookType === 'page';
+
+    const cleanHandle = isFbGroup ? `groups/${activeRawHandle}` : `@${activeRawHandle}`;
+    const cleanName = channelName.trim() || verifiedData?.name || (isFbGroup ? `FB Group: ${activeRawHandle}` : activeRawHandle.replace(/[._-]/g, ' ').replace(/\b\w/g, c => c.toUpperCase()));
+    
+    let canonicalUrl = verifiedData?.canonicalUrl || config.webProfileGenerator(activeRawHandle);
+    let deepLink = verifiedData?.deepLink || config.deepLinkGenerator(activeRawHandle);
+
+    if (isFbGroup) {
+      canonicalUrl = `https://www.facebook.com/groups/${activeRawHandle}`;
+      deepLink = `fb://group/${activeRawHandle}`;
+    } else if (isFbPage) {
+      canonicalUrl = `https://www.facebook.com/${activeRawHandle}`;
+      deepLink = `fb://page/${activeRawHandle}`;
+    }
+
+    const avatarUrl = verifiedData?.avatarUrl || `https://unavatar.io/${selectedPlatform}/${activeRawHandle}?fallback=https://ui-avatars.com/api/?name=${encodeURIComponent(cleanName)}&background=${isFbGroup ? '0E52BD' : '1877F2'}&color=fff`;
 
     try {
       // Call verify endpoint
@@ -194,6 +210,7 @@ export const ConnectSocialAccountModal: React.FC<ConnectSocialAccountModalProps>
       });
 
       let finalAccount: SocialAccount;
+      const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       if (res.ok) {
         const data = await res.json();
         finalAccount = {
@@ -202,9 +219,20 @@ export const ConnectSocialAccountModal: React.FC<ConnectSocialAccountModalProps>
           deepLink,
           avatarUrl,
           followersCount: audienceCount,
+          savedLocally: true,
+          lastSavedAt: `Saved at ${nowTime}`,
+          accountType: isFbGroup ? 'group' : isFbPage ? 'page' : 'profile',
+          facebookType: selectedPlatform === 'facebook' ? (isFbGroup ? 'group' : 'page') : undefined,
         };
       } else {
         throw new Error('Fallback local save');
+      }
+
+      // Immediately redirect to mother app
+      try {
+        window.open(canonicalUrl, '_blank', 'noopener,noreferrer');
+      } catch (e) {
+        console.warn('Redirect skipped', e);
       }
 
       setIsSuccess(true);
@@ -218,9 +246,10 @@ export const ConnectSocialAccountModal: React.FC<ConnectSocialAccountModalProps>
         setHandleInput('');
         setChannelName('');
         setVerifiedData(null);
-      }, 900);
+      }, 700);
 
     } catch {
+      const nowTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       // Direct local creation with verified real data
       const finalAccount: SocialAccount = {
         id: `acc-${selectedPlatform}-${Date.now()}`,
@@ -231,12 +260,23 @@ export const ConnectSocialAccountModal: React.FC<ConnectSocialAccountModalProps>
         followersCount: audienceCount,
         isConnected: true,
         lastSyncedAt: 'Just now',
-        oauthScopes: config.scopes,
+        savedLocally: true,
+        lastSavedAt: `Saved at ${nowTime}`,
+        oauthScopes: isFbGroup ? ['publish_to_groups', 'groups_access_member_info'] : config.scopes,
         appUrl: canonicalUrl,
         deepLink,
         authType: 'oauth2',
         verified: true,
+        accountType: isFbGroup ? 'group' : isFbPage ? 'page' : 'profile',
+        facebookType: selectedPlatform === 'facebook' ? (isFbGroup ? 'group' : 'page') : undefined,
       };
+
+      // Immediately redirect to mother app
+      try {
+        window.open(canonicalUrl, '_blank', 'noopener,noreferrer');
+      } catch (e) {
+        console.warn('Redirect skipped', e);
+      }
 
       setIsSuccess(true);
       setIsConnecting(false);
@@ -248,7 +288,7 @@ export const ConnectSocialAccountModal: React.FC<ConnectSocialAccountModalProps>
         setHandleInput('');
         setChannelName('');
         setVerifiedData(null);
-      }, 900);
+      }, 700);
     }
   };
 
@@ -328,31 +368,115 @@ export const ConnectSocialAccountModal: React.FC<ConnectSocialAccountModalProps>
             <div className="p-6 bg-emerald-50 border border-emerald-200 rounded-2xl text-center space-y-2 animate-in fade-in">
               <CheckCircle2 className="w-10 h-10 text-emerald-600 mx-auto" />
               <h4 className="text-base font-bold text-emerald-950">
-                Channel Successfully Connected & Wired!
+                Channel Successfully Connected & Saved on App!
               </h4>
               <p className="text-xs text-emerald-700">
-                Your real account is now ready for scheduled and direct publishing.
+                Your account is now securely saved on the app and ready for scheduled and direct publishing.
               </p>
             </div>
           )}
 
           {!isSuccess && (
             <>
+              {/* Facebook Page vs Group Selector */}
+              {selectedPlatform === 'facebook' && (
+                <div className="bg-gradient-to-r from-blue-50 to-indigo-50/70 border border-blue-200/80 rounded-2xl p-3.5 space-y-2.5 animate-in fade-in">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-blue-950 flex items-center gap-1.5">
+                      <Users className="w-3.5 h-3.5 text-blue-600" />
+                      <span>Facebook Destination Type</span>
+                    </span>
+                    <span className="text-[10px] text-blue-800 bg-blue-100/90 font-bold px-2 py-0.5 rounded-full border border-blue-200">
+                      {facebookType === 'page' ? 'Brand / Creator Page' : facebookType === 'group' ? 'Community Group' : 'Personal Profile'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => { setFacebookType('page'); setVerifiedData(null); }}
+                      className={`py-2 px-2.5 rounded-xl text-xs font-bold text-center transition-all cursor-pointer flex flex-col items-center gap-0.5 ${
+                        facebookType === 'page'
+                          ? 'bg-blue-600 text-white shadow-xs'
+                          : 'bg-white text-slate-700 hover:bg-blue-50 border border-blue-200'
+                      }`}
+                    >
+                      <Building2 className="w-3.5 h-3.5 mb-0.5" />
+                      <span>FB Page</span>
+                      <span className="text-[9px] opacity-80 font-normal">Brand/Creator</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => { setFacebookType('group'); setVerifiedData(null); }}
+                      className={`py-2 px-2.5 rounded-xl text-xs font-bold text-center transition-all cursor-pointer flex flex-col items-center gap-0.5 ${
+                        facebookType === 'group'
+                          ? 'bg-indigo-600 text-white shadow-xs'
+                          : 'bg-white text-slate-700 hover:bg-indigo-50 border border-indigo-200'
+                      }`}
+                    >
+                      <Users className="w-3.5 h-3.5 mb-0.5" />
+                      <span>FB Group</span>
+                      <span className="text-[9px] opacity-80 font-normal">Community</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => { setFacebookType('profile'); setVerifiedData(null); }}
+                      className={`py-2 px-2.5 rounded-xl text-xs font-bold text-center transition-all cursor-pointer flex flex-col items-center gap-0.5 ${
+                        facebookType === 'profile'
+                          ? 'bg-slate-800 text-white shadow-xs'
+                          : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+                      }`}
+                    >
+                      <Globe className="w-3.5 h-3.5 mb-0.5" />
+                      <span>Personal Profile</span>
+                      <span className="text-[9px] opacity-80 font-normal">Standard</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Real Handle / Profile URL Input */}
               <div>
                 <label className="block text-xs font-semibold text-slate-800 mb-1.5 flex items-center justify-between">
-                  <span>Enter Your Real Username or Profile URL <span className="text-rose-500">*</span></span>
-                  <span className="text-[11px] font-normal text-slate-500">Auto-detects @handles and links</span>
+                  <span>
+                    {selectedPlatform === 'whatsapp' 
+                      ? 'Real WhatsApp Phone Number with Country Code ' 
+                      : selectedPlatform === 'facebook' && facebookType === 'group'
+                      ? 'Facebook Group Slug, ID, or URL '
+                      : selectedPlatform === 'facebook' && facebookType === 'page'
+                      ? 'Facebook Page Username or URL '
+                      : 'Enter Your Real Username or Profile URL '}
+                    <span className="text-rose-500">*</span>
+                  </span>
+                  <span className="text-[11px] font-normal text-slate-500">
+                    {selectedPlatform === 'whatsapp' 
+                      ? 'e.g. +234 812 345 6789 or wa.me/...' 
+                      : selectedPlatform === 'facebook' && facebookType === 'group'
+                      ? 'e.g. facebook.com/groups/community'
+                      : 'Auto-detects @handles and links'}
+                  </span>
                 </label>
                 <div className="flex gap-2">
                   <div className="relative flex-1">
-                    <span className="absolute left-3 top-2.5 text-xs text-slate-400 font-semibold">@</span>
+                    <span className="absolute left-3 top-2.5 text-xs text-slate-400 font-semibold">
+                      {selectedPlatform === 'whatsapp' ? '+' : selectedPlatform === 'facebook' && facebookType === 'group' ? '/' : '@'}
+                    </span>
                     <input
                       type="text"
-                      placeholder={`e.g. your_real_name or ${config.webBaseUrl}/username`}
-                      value={handleInput.replace(/^@/, '')}
+                      placeholder={
+                        selectedPlatform === 'whatsapp'
+                          ? '234 812 345 6789 or wa.me/2348123456789'
+                          : selectedPlatform === 'facebook' && facebookType === 'group'
+                          ? 'groups/yourcommunity or facebook.com/groups/...'
+                          : selectedPlatform === 'facebook' && facebookType === 'page'
+                          ? 'facebook.com/YourPage or @YourPage'
+                          : `e.g. your_real_name or ${config.webBaseUrl}/username`
+                      }
+                      value={selectedPlatform === 'whatsapp' ? handleInput.replace(/^\+/, '') : handleInput.replace(/^@/, '')}
                       onChange={(e) => {
-                        setHandleInput(e.target.value);
+                        setHandleInput(selectedPlatform === 'whatsapp' && !e.target.value.startsWith('+') ? `+${e.target.value.trim()}` : e.target.value);
                         setVerifiedData(null);
                       }}
                       onKeyDown={(e) => {
@@ -560,8 +684,8 @@ export const ConnectSocialAccountModal: React.FC<ConnectSocialAccountModalProps>
               ) : (
                 <>
                   <PlatformIcon platform={selectedPlatform} size={15} />
-                  <span>Confirm & Connect Channel</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
+                  <span>Redirect to Mother App & Connect</span>
+                  <ExternalLink className="w-3.5 h-3.5 ml-0.5" />
                 </>
               )}
             </button>

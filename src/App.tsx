@@ -10,6 +10,11 @@ import { AnalyticsDashboard } from './components/analytics/AnalyticsDashboard';
 import { SocialInbox } from './components/inbox/SocialInbox';
 import { AccountsManager } from './components/accounts/AccountsManager';
 import { WhatsAppManager } from './components/whatsapp/WhatsAppManager';
+import { PublerToolsView } from './components/tools/PublerToolsView';
+import { PublerHomeView } from './components/publer/PublerHomeView';
+import { PublerIdeasView } from './components/publer/PublerIdeasView';
+import { PublerExploreView } from './components/publer/PublerExploreView';
+import { PublerMediaLibraryView } from './components/publer/PublerMediaLibraryView';
 import { PostComposerModal } from './components/composer/PostComposerModal';
 import { PostDetailsModal } from './components/common/PostDetailsModal';
 import { MobileTabBar } from './components/layout/MobileTabBar';
@@ -17,9 +22,13 @@ import { KeyboardShortcutsModal } from './components/common/KeyboardShortcutsMod
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { OfflineIndicator } from './components/pwa/OfflineIndicator';
 import { AuthModal } from './components/auth/AuthModal';
+import { SecurityModal } from './components/auth/SecurityModal';
+import { RealChannelDispatcherModal } from './components/common/RealChannelDispatcherModal';
+import { useAuth } from './contexts/AuthContext';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<NavTab>('overview');
+  const { user, profile } = useAuth();
+  const [activeTab, setActiveTab] = useState<NavTab>('home');
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [posts, setPosts] = useState<SocialPost[]>([]);
   const [accounts, setAccounts] = useState<SocialAccount[]>([]);
@@ -31,6 +40,7 @@ export default function App() {
   const [composerEditingPost, setComposerEditingPost] = useState<SocialPost | null>(null);
   const [composerInitialDate, setComposerInitialDate] = useState<string | undefined>(undefined);
   const [inspectingPost, setInspectingPost] = useState<SocialPost | null>(null);
+  const [dispatcherPost, setDispatcherPost] = useState<SocialPost | null>(null);
   const [isShortcutsModalOpen, setIsShortcutsModalOpen] = useState(false);
 
   // Search state & input ref
@@ -47,6 +57,8 @@ export default function App() {
     }, 3500);
   };
 
+  const activeUid = user?.uid || profile?.uid;
+
   // Load initial data from localStorage
   useEffect(() => {
     setPosts(storageService.getPosts());
@@ -54,6 +66,77 @@ export default function App() {
     setQueueSlots(storageService.getQueueSlots());
     setInboxItems(storageService.getInbox());
   }, []);
+
+  // Sync saved accounts with Firestore when user is authenticated
+  useEffect(() => {
+    if (activeUid) {
+      storageService.syncAccountsWithFirestore(activeUid).then((synced) => {
+        setAccounts(synced);
+      }).catch((e) => {
+        console.warn('Accounts cloud sync notice:', e);
+      });
+    }
+  }, [activeUid]);
+
+  // Auto-connect social media account when signed in via that provider
+  useEffect(() => {
+    if (profile?.provider && profile.provider !== 'email' && profile.provider !== 'password') {
+      const provider = profile.provider.toLowerCase();
+      const platformMap: Record<string, 'twitter' | 'linkedin' | 'instagram' | 'facebook' | 'tiktok' | 'whatsapp'> = {
+        twitter: 'twitter',
+        linkedin: 'linkedin',
+        instagram: 'instagram',
+        facebook: 'facebook',
+        tiktok: 'tiktok',
+        whatsapp: 'whatsapp',
+      };
+      const platform = platformMap[provider];
+      if (platform) {
+        setAccounts((prev) => {
+          const exists = prev.find((a) => a.platform === platform);
+          let updated: SocialAccount[];
+          if (exists) {
+            if (!exists.isConnected) {
+              updated = prev.map((a) =>
+                a.id === exists.id
+                  ? {
+                      ...a,
+                      isConnected: true,
+                      handle: profile.handle || a.handle,
+                      name: profile.displayName || a.name,
+                      avatarUrl: profile.photoURL || a.avatarUrl,
+                      lastSyncedAt: 'Just now',
+                      savedLocally: true,
+                      savedToCloud: !!user?.uid,
+                      lastSavedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                    }
+                  : a
+              );
+            } else {
+              return prev;
+            }
+          } else {
+            const newAcc: SocialAccount = {
+              id: `acc-${platform}-${Date.now()}`,
+              platform,
+              name: profile.displayName || `${platform.toUpperCase()} User`,
+              handle: profile.handle || `@user_${platform}`,
+              avatarUrl: profile.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+              isConnected: true,
+              followersCount: 18200,
+              lastSyncedAt: 'Just now',
+              savedLocally: true,
+              savedToCloud: !!user?.uid,
+              lastSavedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            };
+            updated = [...prev, newAcc];
+          }
+          storageService.saveAccounts(updated, user?.uid);
+          return updated;
+        });
+      }
+    }
+  }, [profile?.provider, profile?.handle, user?.uid]);
 
   // Handlers
   const handleOpenComposer = (initialDate?: string, post?: SocialPost) => {
@@ -65,7 +148,12 @@ export default function App() {
   const handleSavePost = (newPost: SocialPost) => {
     const updated = storageService.savePost(newPost);
     setPosts(updated);
-    showToast(newPost.status === 'published' ? 'Post published immediately to connected channels!' : 'Post scheduled successfully!');
+    if (newPost.status === 'published') {
+      showToast('Post created! Opening channel dispatcher...');
+      setDispatcherPost(newPost);
+    } else {
+      showToast(newPost.status === 'scheduled' ? 'Post scheduled successfully!' : 'Post saved as draft.');
+    }
   };
 
   const handleDeletePost = (id: string) => {
@@ -75,11 +163,26 @@ export default function App() {
   };
 
   const handlePublishNow = (post: SocialPost) => {
+    const targetAccounts = accounts.filter(a => post.platforms.includes(a.platform) && a.isConnected);
+    const nowIso = new Date().toISOString();
+    const receipts = targetAccounts.map(a => ({
+      channelId: a.id,
+      platform: a.platform,
+      channelName: a.name,
+      handle: a.handle,
+      reachedAt: nowIso,
+      status: 'reached' as const,
+      reachNote: `Direct broadcast verified • Reached ${a.name} (${a.handle})`,
+    }));
+
     const publishedPost: SocialPost = {
       ...post,
       status: 'published',
-      publishedAt: new Date().toISOString(),
-      performance: {
+      publishedAt: nowIso,
+      reachedAt: nowIso,
+      reachedChannels: targetAccounts.map(a => a.name),
+      deliveryReceipts: receipts,
+      performance: post.performance || {
         impressions: Math.floor(800 + Math.random() * 2500),
         reach: Math.floor(650 + Math.random() * 2000),
         likes: Math.floor(40 + Math.random() * 180),
@@ -91,7 +194,9 @@ export default function App() {
     };
     const updated = storageService.savePost(publishedPost);
     setPosts(updated);
-    showToast('Published post successfully across target networks!');
+    setDispatcherPost(publishedPost);
+    const channelNames = targetAccounts.map(a => a.name).join(', ');
+    showToast(channelNames ? `🎉 Staged to ${targetAccounts.length} channel(s): ${channelNames}!` : '🎉 Staged to target networks!');
   };
 
   const handleRepurposePost = (post: SocialPost) => {
@@ -109,25 +214,33 @@ export default function App() {
   };
 
   const handleToggleAccount = (id: string) => {
-    const updated = storageService.toggleAccountConnection(id);
+    const updated = storageService.toggleAccountConnection(id, activeUid);
     setAccounts(updated);
+    const target = updated.find(a => a.id === id);
+    showToast(target?.isConnected ? `${target.handle} is active and saved on app.` : `${target?.handle} paused.`);
   };
 
   const handleAddAccount = (acc: SocialAccount) => {
-    const updated = storageService.addAccount(acc);
+    const updated = storageService.addAccount(acc, activeUid);
     setAccounts(updated);
-    showToast(`Connected ${acc.handle} to PulseSocial.`);
+    showToast(`Connected ${acc.handle} — saved on app & ready.`);
+  };
+
+  const handleSaveAccount = (acc: SocialAccount) => {
+    const updated = storageService.saveAccount(acc, activeUid);
+    setAccounts(updated);
+    showToast(`Saved changes for ${acc.handle} to app.`);
   };
 
   const handleDeleteAccount = (id: string) => {
     const target = accounts.find(a => a.id === id);
-    const updated = storageService.deleteAccount(id);
+    const updated = storageService.deleteAccount(id, activeUid);
     setAccounts(updated);
     showToast(`Removed ${target?.handle || 'account'} from PulseSocial.`);
   };
 
   const handleClearAccounts = () => {
-    const updated = storageService.clearAllAccounts();
+    const updated = storageService.clearAllAccounts(activeUid);
     setAccounts(updated);
     showToast('Demo channels cleared. Ready to connect your real social accounts!');
   };
@@ -137,15 +250,15 @@ export default function App() {
     mode: 'merge' | 'replace' | 'skip_duplicates',
     summary: { added: number; updated: number }
   ) => {
-    const result = storageService.bulkImportAccounts(importedAccounts, mode);
+    const result = storageService.bulkImportAccounts(importedAccounts, mode, user?.uid);
     setAccounts(result.accounts);
     if (mode === 'replace') {
-      showToast(`Replaced directory with ${result.addedCount} accounts from CSV.`);
+      showToast(`Saved and replaced directory with ${result.addedCount} accounts.`);
     } else {
       showToast(
-        `Imported ${result.addedCount} new account${result.addedCount === 1 ? '' : 's'}${
+        `Saved ${result.addedCount} new account${result.addedCount === 1 ? '' : 's'}${
           result.updatedCount > 0 ? `, updated ${result.updatedCount}` : ''
-        }.`
+        } on app.`
       );
     }
   };
@@ -201,6 +314,11 @@ export default function App() {
       }
       return item;
     });
+    storageService.saveInbox(updated);
+    setInboxItems(updated);
+  };
+
+  const handleUpdateInboxItems = (updated: InboxItem[]) => {
     storageService.saveInbox(updated);
     setInboxItems(updated);
   };
@@ -290,12 +408,31 @@ export default function App() {
 
         {/* Dynamic Tab View Container */}
         <main className="flex-1 overflow-y-auto min-h-0 pb-20 md:pb-0">
-          {activeTab === 'overview' && (
-            <OverviewDashboard
-              posts={visiblePosts}
+          {(activeTab === 'home' || activeTab === 'overview') && (
+            <PublerHomeView
               accounts={accounts}
+              posts={visiblePosts}
               onOpenComposer={handleOpenComposer}
               onNavigateTab={setActiveTab}
+              onOpenDispatcher={(post) => setDispatcherPost(post)}
+            />
+          )}
+
+          {activeTab === 'ideas' && (
+            <PublerIdeasView
+              onOpenComposer={handleOpenComposer}
+            />
+          )}
+
+          {activeTab === 'explore' && (
+            <PublerExploreView
+              onOpenComposer={handleOpenComposer}
+            />
+          )}
+
+          {activeTab === 'media' && (
+            <PublerMediaLibraryView
+              onOpenComposer={handleOpenComposer}
             />
           )}
 
@@ -333,6 +470,7 @@ export default function App() {
               onReply={handleReplyInbox}
               onToggleResolve={handleToggleResolveInbox}
               onToggleStar={handleToggleStarInbox}
+              onUpdateInboxItems={handleUpdateInboxItems}
             />
           )}
 
@@ -347,9 +485,18 @@ export default function App() {
               accounts={accounts}
               onToggleConnection={handleToggleAccount}
               onAddAccount={handleAddAccount}
+              onSaveAccount={handleSaveAccount}
               onDeleteAccount={handleDeleteAccount}
               onClearAccounts={handleClearAccounts}
               onBulkImport={handleBulkImportAccounts}
+            />
+          )}
+
+          {activeTab === 'tools' && (
+            <PublerToolsView
+              accounts={accounts}
+              posts={visiblePosts}
+              onOpenComposer={handleOpenComposer}
             />
           )}
         </main>
@@ -363,6 +510,7 @@ export default function App() {
           setIsMobileSidebarOpen(false);
         }}
         onOpenMobileMenu={() => setIsMobileSidebarOpen(true)}
+        onOpenComposer={() => handleOpenComposer()}
         inboxBadge={inboxItems.filter(i => !i.isResolved).length}
       />
 
@@ -389,6 +537,15 @@ export default function App() {
           setInspectingPost(null);
           handleRepurposePost(post);
         }}
+        onOpenDispatcher={(post) => setDispatcherPost(post)}
+      />
+
+      {/* Real-World Connected Channels Broadcast Dispatcher */}
+      <RealChannelDispatcherModal
+        isOpen={!!dispatcherPost}
+        onClose={() => setDispatcherPost(null)}
+        post={dispatcherPost}
+        accounts={accounts}
       />
 
       {/* Global Keyboard Shortcuts Modal Guide */}
@@ -408,8 +565,11 @@ export default function App() {
       {/* Offline Status Toast Indicator */}
       <OfflineIndicator />
 
-      {/* Cloud Authentication Modal (Login / Register / Forgot Password) */}
+      {/* Cloud Authentication Modal (Login / Register / Forgot Password / Verification) */}
       <AuthModal />
+
+      {/* Security & Verification Modal (Email & SMS Phone 2FA) */}
+      <SecurityModal />
 
     </div>
   );

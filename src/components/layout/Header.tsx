@@ -1,8 +1,16 @@
 import React, { useState } from 'react';
-import { Plus, Download, RefreshCw, Search, Menu, X, TrendingUp, Keyboard } from 'lucide-react';
+import { 
+  Bell, 
+  SlidersHorizontal, 
+  Search, 
+  Menu, 
+  X, 
+  Plus, 
+  RefreshCw, 
+  Download, 
+  Keyboard 
+} from 'lucide-react';
 import { NavTab } from './Sidebar';
-import { PWAInstallButton } from '../pwa/PWAInstallButton';
-import { UserMenu } from '../auth/UserMenu';
 
 interface HeaderProps {
   activeTab: NavTab;
@@ -16,14 +24,19 @@ interface HeaderProps {
   searchInputRef?: React.RefObject<HTMLInputElement | null>;
 }
 
-const TAB_TITLES: Record<NavTab, { title: string; subtitle: string }> = {
-  overview: { title: 'Dashboard', subtitle: 'Cross-platform performance & upcoming publishing schedule' },
-  calendar: { title: 'Content Calendar', subtitle: 'Visual multi-channel scheduling & editorial pipeline' },
-  queue: { title: 'Publishing Queue', subtitle: 'Automated time slots and scheduled release buffer' },
-  analytics: { title: 'Performance Analytics', subtitle: 'Cross-network audience reach, CTR, engagement & ROI' },
-  inbox: { title: 'Social Inbox', subtitle: 'Unified incoming comments, direct messages & mentions' },
-  whatsapp: { title: 'WhatsApp Messenger', subtitle: 'Direct messages, contact chats, 24h status stories & click-to-chat' },
-  accounts: { title: 'Connected Channels', subtitle: 'OAuth credentials, channel status & follower health' },
+const TAB_TITLES: Record<string, { title: string; subtitle: string }> = {
+  home: { title: 'Home', subtitle: 'Things to do & active channels' },
+  overview: { title: 'Home', subtitle: 'Things to do & active channels' },
+  ideas: { title: 'Ideas', subtitle: 'Draft concepts & brainstorming board' },
+  explore: { title: 'Explore', subtitle: 'News, industry headlines & RSS' },
+  calendar: { title: 'Calendar', subtitle: 'Visual publishing calendar' },
+  media: { title: 'Media Library', subtitle: 'Asset storage, Canva & Stock' },
+  analytics: { title: 'Analytics', subtitle: 'Performance & post insights' },
+  accounts: { title: 'Channels', subtitle: 'OAuth credentials & mother apps' },
+  tools: { title: 'Publer Tools', subtitle: 'Hashtag bundles, signatures & Link in Bio' },
+  whatsapp: { title: 'WhatsApp', subtitle: 'Direct chats & status stories' },
+  queue: { title: 'Queue', subtitle: 'AutoSchedule queue slots' },
+  inbox: { title: 'Inbox', subtitle: 'Comments & mentions' },
 };
 
 export const Header: React.FC<HeaderProps> = ({
@@ -37,171 +50,54 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenShortcuts,
   searchInputRef,
 }) => {
-  const meta = TAB_TITLES[activeTab] || { title: 'Dashboard', subtitle: '' };
+  const meta = TAB_TITLES[activeTab] || { title: 'Home', subtitle: '' };
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
 
   return (
-    <header className="h-16 px-4 sm:px-6 bg-white border-b border-slate-200 flex items-center justify-between shrink-0 relative z-20">
+    <header className="h-14 sm:h-16 px-4 sm:px-6 bg-white border-b border-slate-200/90 flex items-center justify-between shrink-0 relative z-20 select-none">
       
-      {/* Mobile Search Overlay if opened */}
-      {isMobileSearchOpen ? (
-        <div className="flex md:hidden items-center gap-2 w-full animate-in fade-in duration-150">
-          <div className="relative flex-1">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-            <input
-              type="text"
-              autoFocus
-              value={searchQuery}
-              onChange={(e) => onSearchChange(e.target.value)}
-              placeholder="Search posts, tags, authors..."
-              className="w-full pl-9 pr-8 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:bg-white text-slate-800"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => onSearchChange('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
-          <button
-            onClick={() => setIsMobileSearchOpen(false)}
-            className="min-h-[44px] px-2 text-xs font-semibold text-slate-600 hover:text-slate-900 cursor-pointer"
-          >
-            Cancel
-          </button>
+      {/* Publer Mobile & Desktop Header: Left "M" Avatar, Center Title, Right Bell + Menu */}
+      <div className="flex items-center justify-between w-full max-w-4xl mx-auto">
+        
+        {/* Left: Squircle "M" Avatar (Screenshot 1-6 Left) */}
+        <div 
+          onClick={onOpenMobileMenu}
+          className="w-8.5 h-8.5 rounded-xl bg-[#1e1b4b] hover:bg-[#2e1065] text-white font-black flex items-center justify-center text-sm shadow-xs cursor-pointer select-none transition-transform active:scale-95 shrink-0"
+          title="Account Menu"
+        >
+          M
         </div>
-      ) : (
-        <>
-          {/* Zone 1: Breadcrumb, Brand icon & Context */}
-          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
-            {/* Hamburger for mobile */}
-            {onOpenMobileMenu && (
-              <button
-                onClick={onOpenMobileMenu}
-                className="md:hidden min-h-[44px] min-w-[44px] -ml-2 flex items-center justify-center text-slate-600 hover:text-slate-900 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
-                aria-label="Open navigation menu"
-              >
-                <Menu className="w-5 h-5" />
-              </button>
-            )}
 
-            {/* Mobile Brand Mark */}
-            <div className="md:hidden flex items-center gap-1.5 shrink-0">
-              <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center text-white shadow-2xs">
-                <TrendingUp className="w-4 h-4" />
-              </div>
-            </div>
+        {/* Center: Bold Title (Screenshot 1-6 Center) */}
+        <h1 className="text-base sm:text-lg font-extrabold text-slate-900 tracking-tight text-center truncate px-2">
+          {meta.title}
+        </h1>
 
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5 text-xs text-slate-500 font-medium truncate">
-                <span className="hidden sm:inline">PulseMedia</span>
-                <span className="hidden sm:inline" aria-hidden="true">/</span>
-                <span className="text-slate-900 font-semibold truncate">{meta.title}</span>
-              </div>
-              <p className="text-xs text-slate-500 hidden lg:block truncate max-w-md">
-                {meta.subtitle}
-              </p>
-            </div>
-          </div>
+        {/* Right: Bell with Pink Dot & Menu Icon (Screenshot 1-6 Right) */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            className="relative p-1.5 text-slate-700 hover:text-slate-900 rounded-lg cursor-pointer transition-colors"
+            title="Notifications"
+          >
+            <Bell className="w-5 h-5 text-slate-800" />
+            <span className="absolute top-1 right-1 w-2.5 h-2.5 rounded-full bg-pink-500 ring-2 ring-white" />
+          </button>
 
-          {/* Zone 2: Desktop Search Input */}
-          <div className="hidden md:flex items-center relative max-w-xs w-64 mx-4">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 pointer-events-none" />
-            <input
-              ref={searchInputRef}
-              type="text"
-              value={searchQuery}
-              onChange={(e) => onSearchChange(e.target.value)}
-              placeholder="Search posts, tags..."
-              className="w-full pl-8 pr-12 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:bg-white text-slate-800 placeholder:text-slate-400 transition-colors"
-            />
-            {searchQuery ? (
-              <button
-                onClick={() => onSearchChange('')}
-                className="absolute right-2 text-slate-400 hover:text-slate-600"
-                title="Clear search"
-              >
-                <X className="w-3 h-3" />
-              </button>
-            ) : (
-              <div className="absolute right-2 flex items-center gap-0.5 pointer-events-none">
-                <kbd className="hidden lg:inline-flex items-center justify-center px-1.5 py-0.5 text-[10px] font-mono font-medium text-slate-400 bg-slate-100 border border-slate-200 rounded">
-                  /
-                </kbd>
-              </div>
-            )}
-          </div>
-
-          {/* Zone 3: Primary Actions */}
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            {/* Mobile Search Button */}
+          {onOpenMobileMenu && (
             <button
-              onClick={() => setIsMobileSearchOpen(true)}
-              title="Search posts (S)"
-              className="md:hidden min-h-[44px] min-w-[44px] flex items-center justify-center text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-              aria-label="Search"
+              type="button"
+              onClick={onOpenMobileMenu}
+              className="p-1.5 text-slate-700 hover:text-slate-900 rounded-lg cursor-pointer transition-colors"
+              title="Filter & menu"
             >
-              <Search className="w-4 h-4" />
+              <SlidersHorizontal className="w-5 h-5 text-slate-800" />
             </button>
+          )}
+        </div>
 
-            {/* Keyboard Shortcuts Dialog Button */}
-            {onOpenShortcuts && (
-              <button
-                onClick={onOpenShortcuts}
-                title="Keyboard Shortcuts (?)"
-                className="min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 p-2 sm:p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg sm:rounded-md transition-colors cursor-pointer flex items-center justify-center group"
-                aria-label="Keyboard shortcuts"
-              >
-                <Keyboard className="w-4 h-4 sm:w-3.5 sm:h-3.5 group-hover:text-indigo-600 transition-colors" />
-              </button>
-            )}
+      </div>
 
-            {/* Reset Data Button */}
-            <button
-              onClick={onResetData}
-              title="Reset to initial sample data"
-              className="min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 p-2 sm:p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg sm:rounded-md transition-colors cursor-pointer flex items-center justify-center"
-              aria-label="Reset demo data"
-            >
-              <RefreshCw className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
-            </button>
-
-            {onExportCsv && (
-              <button
-                onClick={onExportCsv}
-                className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-md transition-colors cursor-pointer shadow-2xs whitespace-nowrap min-h-[36px]"
-              >
-                <Download className="w-3.5 h-3.5 text-slate-500" />
-                <span>Export CSV</span>
-              </button>
-            )}
-
-            {/* PWA Mobile App Install Button */}
-            <PWAInstallButton variant="nav" />
-
-            {/* New Post Button */}
-            <button
-              onClick={onOpenComposer}
-              title="Compose Post (C)"
-              className="min-h-[44px] sm:min-h-0 flex items-center gap-1.5 px-3 sm:px-3.5 py-2 sm:py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg sm:rounded-md transition-colors cursor-pointer shadow-xs whitespace-nowrap"
-            >
-              <Plus className="w-4 h-4 sm:w-3.5 sm:h-3.5" />
-              <span className="hidden xs:inline">New Post</span>
-              <span className="xs:hidden">Post</span>
-              <kbd className="hidden lg:inline-flex items-center justify-center ml-1 px-1 py-0.2 text-[10px] font-mono font-bold text-indigo-200 bg-indigo-700/80 rounded">
-                C
-              </kbd>
-            </button>
-
-            {/* User Account / Sign In / Register / Log Out */}
-            <div className="pl-1 border-l border-slate-200">
-              <UserMenu variant="header" />
-            </div>
-          </div>
-        </>
-      )}
     </header>
   );
 };

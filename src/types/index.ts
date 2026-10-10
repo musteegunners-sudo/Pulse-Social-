@@ -77,6 +77,13 @@ export interface SocialAccount {
   tokenExpiresAt?: string;
   authType?: 'oauth2' | 'app_connect' | 'api_key';
   verified?: boolean;
+  savedLocally?: boolean;
+  savedToCloud?: boolean;
+  lastSavedAt?: string;
+  notes?: string;
+  accountType?: 'page' | 'group' | 'profile' | 'channel';
+  facebookType?: 'page' | 'group';
+  facebookId?: string;
 }
 
 export interface PostPerformance {
@@ -90,15 +97,47 @@ export interface PostPerformance {
   saves?: number;
 }
 
+export type PostContentType = 'text' | 'photos' | 'video';
+
+export interface PostMediaItem {
+  id: string;
+  type: 'image' | 'video';
+  url: string;
+  thumbnailUrl?: string;
+  name?: string;
+  aspectRatio?: '1:1' | '16:9' | '9:16' | '4:5';
+  duration?: number; // duration in seconds for video
+}
+
+export interface ChannelDeliveryReceipt {
+  channelId: string;
+  platform: SocialPlatform;
+  channelName: string;
+  handle: string;
+  reachedAt: string; // ISO timestamp
+  status: 'reached' | 'broadcasting' | 'scheduled' | 'failed';
+  reachNote?: string;
+}
+
 export interface SocialPost {
   id: string;
+  postType?: PostContentType;
   content: string;
   platforms: SocialPlatform[];
   targetAccountIds: string[];
   scheduledFor: string; // ISO string
   publishedAt?: string;
+  reachedAt?: string; // ISO timestamp when post reached connected channels
+  reachedChannels?: string[]; // IDs or handles of channels reached
+  deliveryReceipts?: ChannelDeliveryReceipt[];
   status: PostStatus;
   mediaUrls?: string[];
+  mediaItems?: PostMediaItem[];
+  videoUrl?: string;
+  videoThumbnail?: string;
+  videoDuration?: number; // in seconds
+  aspectRatio?: '1:1' | '16:9' | '9:16' | '4:5';
+  textBackground?: string; // for styled text posts e.g. 'gradient-purple', 'sunset', etc.
   firstComment?: string;
   tags?: string[];
   performance?: PostPerformance;
@@ -115,6 +154,8 @@ export interface QueueSlot {
   isEnabled: boolean;
 }
 
+export type SentimentType = 'positive' | 'neutral' | 'negative';
+
 export interface InboxItem {
   id: string;
   platform: SocialPlatform;
@@ -128,7 +169,10 @@ export interface InboxItem {
   timestamp: string;
   isResolved: boolean;
   isStarred: boolean;
-  sentiment: 'positive' | 'question' | 'neutral' | 'urgent';
+  sentiment: SentimentType | 'question' | 'urgent';
+  sentimentScore?: number; // 0.0 - 1.0 confidence score
+  sentimentReason?: string; // Concise explanation of the sentiment analysis
+  sentimentAnalyzedAt?: string;
   replies: Array<{
     id: string;
     sender: string;

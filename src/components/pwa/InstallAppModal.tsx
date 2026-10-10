@@ -16,7 +16,9 @@ import {
   Package,
   Terminal,
   FileCode,
-  FolderGit2
+  FolderGit2,
+  AlertCircle,
+  CheckCircle2
 } from 'lucide-react';
 import { usePWAInstall } from '../../hooks/usePWAInstall';
 import { generateLocalQRCodeDataUrl } from '../../utils/qrCode';
@@ -37,6 +39,7 @@ export const InstallAppModal: React.FC<InstallAppModalProps> = ({
   const [copied, setCopied] = useState(false);
   const [copiedSnippet, setCopiedSnippet] = useState<string | null>(null);
   const [installing, setInstalling] = useState(false);
+  const [directInstallNotice, setDirectInstallNotice] = useState<'idle' | 'installed' | 'iframe' | 'manual'>('idle');
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>('');
 
   const currentUrl = typeof window !== 'undefined' ? window.location.href : 'https://pulsesocial.app';
@@ -47,6 +50,7 @@ export const InstallAppModal: React.FC<InstallAppModalProps> = ({
       if (defaultTab) {
         setActiveTab(defaultTab);
       }
+      setDirectInstallNotice('idle');
     }
   }, [isOpen, currentUrl, defaultTab]);
 
@@ -66,10 +70,31 @@ export const InstallAppModal: React.FC<InstallAppModalProps> = ({
 
   const handleDirectInstall = async () => {
     setInstalling(true);
-    const success = await install();
+    setDirectInstallNotice('idle');
+
+    const isInIframe = typeof window !== 'undefined' && window.self !== window.top;
+
+    if (isInstallable) {
+      try {
+        const success = await install();
+        setInstalling(false);
+        if (success) {
+          setDirectInstallNotice('installed');
+          setTimeout(() => onClose(), 2500);
+          return;
+        }
+      } catch (err) {
+        console.error('PWA install error:', err);
+      }
+    }
+
     setInstalling(false);
-    if (success) {
-      onClose();
+    if (isInIframe) {
+      setDirectInstallNotice('iframe');
+    } else if (isIOS) {
+      setActiveTab('ios');
+    } else {
+      setDirectInstallNotice('manual');
     }
   };
 
@@ -165,50 +190,131 @@ export const InstallAppModal: React.FC<InstallAppModalProps> = ({
           {/* TAB: Build APK */}
           {activeTab === 'apk' && (
             <div className="space-y-4">
-              {/* Direct Installation Action Banner */}
-              <div className="p-4 bg-gradient-to-r from-emerald-900 via-teal-900 to-slate-900 rounded-xl text-white border border-emerald-500/30 shadow-sm space-y-3">
+              {/* Primary APK Download & Manual Sideload Banner */}
+              <div className="p-4 sm:p-5 bg-gradient-to-r from-emerald-950 via-slate-900 to-emerald-950 rounded-2xl text-white border border-emerald-500/40 shadow-sm space-y-4">
                 <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-lg bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-emerald-300 shrink-0">
-                      <Smartphone className="w-5 h-5" />
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-emerald-300 shrink-0 shadow-inner">
+                      <Package className="w-5 h-5" />
                     </div>
                     <div>
-                      <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
-                        Direct Android APK & App Installation
+                      <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                        Download PulseSocial.apk
                         <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
                       </h4>
-                      <p className="text-[11px] text-emerald-200/80">
-                        Package: <span className="font-mono text-emerald-300">com.pulsesocial.app</span>
+                      <p className="text-xs text-emerald-200/80">
+                        Package: <span className="font-mono text-emerald-300">com.pulsesocial.app</span> &bull; Version 1.0.0
                       </p>
                     </div>
                   </div>
-                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
-                    Ready
+                  <span className="px-2.5 py-1 rounded-md text-[10px] font-bold font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 uppercase">
+                    0.47 MB &bull; Signed
                   </span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  Download the standalone Android APK directly into your device's Downloads folder so you can manually install (sideload) it without Google Play Store or any developer tools.
+                </p>
+
+                {/* Primary Download Button */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                  <a
+                    href="/api/download/pulsesocial.apk"
+                    download="PulseSocial.apk"
+                    className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl text-xs font-bold transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer active:scale-98"
+                  >
+                    <Download className="w-4 h-4 text-slate-950" />
+                    <span>Download PulseSocial.apk (0.47 MB)</span>
+                  </a>
+
+                  <a
+                    href="/pulsesocial-android.zip"
+                    download="PulseSocial-Android-Package.zip"
+                    className="w-full py-3 px-4 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-semibold backdrop-blur-xs transition-colors flex items-center justify-center gap-2 border border-white/15 cursor-pointer active:scale-98"
+                  >
+                    <Package className="w-4 h-4 text-emerald-300" />
+                    <span>Download Source Project (.zip)</span>
+                  </a>
+                </div>
+
+                {/* 4-Step Sideload Manual Install Guide */}
+                <div className="bg-black/30 rounded-xl p-3.5 border border-emerald-500/20 space-y-2.5">
+                  <div className="flex items-center gap-2 text-xs font-bold text-emerald-300">
+                    <Smartphone className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>How to manually install on your Android device (4 quick steps):</span>
+                  </div>
+                  <ol className="text-xs text-slate-300 space-y-1.5 list-decimal pl-4">
+                    <li>
+                      <strong>Download:</strong> Tap the green <span className="text-emerald-300 font-semibold">Download PulseSocial.apk</span> button above.
+                    </li>
+                    <li>
+                      <strong>Open File:</strong> Pull down your notification bar or open your <strong>Files</strong> / <strong>Downloads</strong> app, then tap <span className="font-mono text-emerald-200">PulseSocial.apk</span>.
+                    </li>
+                    <li>
+                      <strong>Allow Installation:</strong> If Android says <em>"For your security, your phone is not allowed to install unknown apps from this source"</em>, tap <strong>Settings</strong> and toggle <strong>"Allow from this source"</strong> to ON.
+                    </li>
+                    <li>
+                      <strong>Install:</strong> Tap <strong>Install</strong>, then tap <strong>Open</strong> to start using PulseSocial directly on your home screen!
+                    </li>
+                  </ol>
+                </div>
+
+                {/* Browser 1-Click Alternate Option */}
+                <div className="pt-1 flex flex-col sm:flex-row items-center justify-between gap-2 border-t border-emerald-500/20 text-[11px] text-emerald-200/80">
+                  <span>Prefer 1-click browser installation without downloading APK?</span>
                   <button
                     onClick={handleDirectInstall}
                     disabled={installing}
-                    className="w-full py-2.5 px-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-lg text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-2 cursor-pointer"
+                    className="px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 text-xs font-semibold border border-emerald-400/30 cursor-pointer transition-colors"
                   >
-                    <Download className="w-4 h-4" />
-                    <span>{installing ? 'Initiating Install...' : 'Direct Install to Device'}</span>
+                    {installing ? 'Checking...' : 'Try Browser 1-Click Install'}
                   </button>
-
-                  <a
-                    href="/api/download/android-package"
-                    download="PulseSocial-Android-Package.zip"
-                    className="w-full py-2.5 px-3 bg-white/10 hover:bg-white/20 text-white rounded-lg text-xs font-semibold backdrop-blur-xs transition-colors flex items-center justify-center gap-2 border border-white/10 cursor-pointer"
-                  >
-                    <Package className="w-4 h-4 text-emerald-300" />
-                    <span>Download Android (.zip)</span>
-                  </a>
                 </div>
-                <p className="text-[10px] text-emerald-200/70 text-center sm:text-left">
-                  Tapping "Direct Install" prompts the native Android installer on Chrome / Android devices.
-                </p>
+
+                {/* Direct Notice Feedback */}
+                {directInstallNotice === 'iframe' && (
+                  <div className="p-3 bg-amber-500/20 border border-amber-400/40 rounded-lg text-xs space-y-2 animate-in fade-in">
+                    <div className="flex items-start gap-2">
+                      <AlertCircle className="w-4 h-4 text-amber-300 shrink-0 mt-0.5" />
+                      <div className="space-y-1">
+                        <p className="font-bold text-amber-100">Running inside Preview iFrame</p>
+                        <p className="text-[11px] text-amber-200/90 leading-relaxed">
+                          Browser automated 1-click popups are blocked by iframes. Use the <strong>"Download PulseSocial.apk"</strong> button above for direct manual install, or open in a full window:
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      <a
+                        href={currentUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-md text-xs font-bold transition-colors cursor-pointer"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                        <span>Open in Full Browser Tab</span>
+                      </a>
+                    </div>
+                  </div>
+                )}
+
+                {directInstallNotice === 'manual' && (
+                  <div className="p-3 bg-indigo-500/20 border border-indigo-400/40 rounded-lg text-xs space-y-1.5 animate-in fade-in">
+                    <p className="font-bold text-indigo-100 flex items-center gap-1.5">
+                      <Smartphone className="w-4 h-4 text-indigo-300" />
+                      Manual 1-Click Install for Android:
+                    </p>
+                    <p className="text-[11px] text-indigo-200/90 leading-relaxed">
+                      Tap your browser's top-right menu <strong>(⋮)</strong> &rarr; tap <strong>"Install app"</strong> or <strong>"Add to Home Screen"</strong> to install PulseSocial directly to your device launcher.
+                    </p>
+                  </div>
+                )}
+
+                {directInstallNotice === 'installed' && (
+                  <div className="p-3 bg-emerald-500/30 border border-emerald-400/40 rounded-lg text-xs flex items-center gap-2 animate-in fade-in text-emerald-100">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-300 shrink-0" />
+                    <span className="font-bold">PulseSocial is installing to your device!</span>
+                  </div>
+                )}
               </div>
 
               {/* Scan to Install on Phone Mini Card */}

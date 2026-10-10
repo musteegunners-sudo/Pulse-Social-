@@ -10,14 +10,32 @@ import {
   TrendingUp,
   X,
   Sparkles,
-  Keyboard
+  Keyboard,
+  Wrench,
+  Home,
+  LayoutGrid,
+  Compass,
+  Image as ImageIcon
 } from 'lucide-react';
 import { SocialAccount } from '../../types';
 import { PlatformIcon } from '../common/PlatformIcon';
 import { PWAInstallButton } from '../pwa/PWAInstallButton';
+import { ApkInstallButton } from './ApkInstallButton';
 import { UserMenu } from '../auth/UserMenu';
 
-export type NavTab = 'overview' | 'calendar' | 'queue' | 'analytics' | 'inbox' | 'whatsapp' | 'accounts';
+export type NavTab = 
+  | 'home'
+  | 'ideas'
+  | 'explore'
+  | 'calendar'
+  | 'media'
+  | 'analytics'
+  | 'overview'
+  | 'queue'
+  | 'inbox'
+  | 'whatsapp'
+  | 'accounts'
+  | 'tools';
 
 interface SidebarProps {
   activeTab: NavTab;
@@ -41,13 +59,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const connectedCount = accounts.filter(a => a.isConnected).length;
 
   const navItems: Array<{ id: NavTab; label: string; icon: React.ReactNode; shortcut: string; badge?: number }> = [
-    { id: 'overview', label: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4 shrink-0" />, shortcut: '1' },
-    { id: 'calendar', label: 'Content Calendar', icon: <CalendarDays className="w-4 h-4 shrink-0" />, shortcut: '2' },
-    { id: 'queue', label: 'Publishing Queue', icon: <Layers className="w-4 h-4 shrink-0" />, shortcut: '3' },
-    { id: 'analytics', label: 'Analytics & Reports', icon: <BarChart3 className="w-4 h-4 shrink-0" />, shortcut: '4' },
-    { id: 'inbox', label: 'Social Inbox', icon: <MessageSquareText className="w-4 h-4 shrink-0" />, shortcut: '5', badge: 3 },
-    { id: 'whatsapp', label: 'WhatsApp Messenger', icon: <PlatformIcon platform="whatsapp" size={16} className="w-4 h-4 shrink-0 text-emerald-600" />, shortcut: '7', badge: 2 },
-    { id: 'accounts', label: 'Channels & Accounts', icon: <Share2 className="w-4 h-4 shrink-0" />, shortcut: '6' },
+    { id: 'home', label: 'Home', icon: <Home className="w-4 h-4 shrink-0 text-cyan-600" />, shortcut: '1' },
+    { id: 'ideas', label: 'Ideas Board', icon: <LayoutGrid className="w-4 h-4 shrink-0 text-amber-500" />, shortcut: '2' },
+    { id: 'explore', label: 'Explore & News', icon: <Compass className="w-4 h-4 shrink-0 text-cyan-500" />, shortcut: '3' },
+    { id: 'calendar', label: 'Calendar', icon: <CalendarDays className="w-4 h-4 shrink-0 text-blue-500" />, shortcut: '4' },
+    { id: 'media', label: 'Media Library', icon: <ImageIcon className="w-4 h-4 shrink-0 text-purple-500" />, shortcut: '5' },
+    { id: 'analytics', label: 'Analytics', icon: <TrendingUp className="w-4 h-4 shrink-0 text-emerald-500" />, shortcut: '6' },
+    { id: 'accounts', label: 'Connected Channels', icon: <Share2 className="w-4 h-4 shrink-0" />, shortcut: '7' },
+    { id: 'tools', label: 'Social Media Tools', icon: <Wrench className="w-4 h-4 shrink-0" />, shortcut: '8' },
+    { id: 'whatsapp', label: 'WhatsApp Messenger', icon: <PlatformIcon platform="whatsapp" size={16} className="w-4 h-4 shrink-0 text-emerald-600" />, shortcut: '9', badge: 2 },
   ];
 
   const handleNavClick = (tab: NavTab) => {
@@ -167,10 +187,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
       </nav>
 
-      {/* Footer / Quick Help & Shortcuts Trigger */}
+      {/* Footer / Navigation Bottom - User Account & APK Install */}
       <div className="p-3 border-t border-slate-100 bg-slate-50/50 shrink-0 space-y-2">
         {/* User Account / Sign In Widget */}
         <UserMenu variant="sidebar" />
+
+        {/* Dedicated Android APK Install Button at Navigation Bottom */}
+        <ApkInstallButton variant="sidebar" />
 
         {/* Mobile PWA Install Banner */}
         <PWAInstallButton variant="sidebar" />

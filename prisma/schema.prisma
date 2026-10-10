@@ -1,0 +1,64 @@
+// prisma/schema.prisma
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id            String          @id @default(cuid())
+  email         String          @unique
+  name          String
+  password      String          // hashed
+  createdAt     DateTime        @default(now())
+  accounts      SocialAccount[]
+  posts         SocialPost[]
+  inboxItems    InboxItem[]
+}
+
+model SocialAccount {
+  id             String       @id @default(cuid())
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  platform       String       // "twitter", "linkedin", etc
+  handle         String
+  accessToken    String
+  refreshToken   String?
+  isConnected    Boolean      @default(true)
+  followersCount Int          @default(0)
+  avatarUrl      String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  posts          SocialPost[]
+}
+
+model SocialPost {
+  id              String         @id @default(cuid())
+  userId          String
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  socialAccountId String?
+  socialAccount   SocialAccount? @relation(fields: [socialAccountId], references: [id])
+  content         String
+  platforms       String         // JSON stringified array: e.g. ["twitter", "linkedin"]
+  status          String         // "draft", "scheduled", "published"
+  scheduledFor    DateTime?
+  publishedAt     DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  performance     String?        // JSON stringified object: impressions, engagement, etc
+}
+
+model InboxItem {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  platform   String
+  author     String
+  content    String
+  isResolved Boolean  @default(false)
+  isStarred  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+}

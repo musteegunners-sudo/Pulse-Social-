@@ -26,13 +26,15 @@ import {
   Share2, 
   Trash2,
   Calendar,
-  AlertCircle
+  AlertCircle,
+  ArrowLeft
 } from 'lucide-react';
 import { 
   WhatsAppChat, 
   WhatsAppMessage, 
   WhatsAppStatusItem, 
-  WhatsAppContactStatus 
+  WhatsAppContactStatus,
+  SocialAccount
 } from '../../types';
 import { storageService } from '../../services/storageService';
 import { DirectMessageLauncherModal } from './DirectMessageLauncherModal';
@@ -40,7 +42,9 @@ import { CreateStatusModal } from './CreateStatusModal';
 import { WhatsAppStatusViewerModal } from './WhatsAppStatusViewerModal';
 import { WhatsAppStatusViewsModal } from './WhatsAppStatusViewsModal';
 import { WhatsAppBroadcastModal } from './WhatsAppBroadcastModal';
+import { WhatsAppLinkModal } from './WhatsAppLinkModal';
 import { MEDIA_PRESETS } from '../../data/initialData';
+import { auth } from '../../lib/firebase';
 
 interface WhatsAppManagerProps {
   onOpenComposer?: (initialDate?: string) => void;
@@ -84,6 +88,15 @@ export const WhatsAppManager: React.FC<WhatsAppManagerProps> = ({ onOpenComposer
   const [statusViewerContactIndex, setStatusViewerContactIndex] = useState(0);
   const [inspectingMyStatus, setInspectingMyStatus] = useState<WhatsAppStatusItem | null>(null);
   const [isBroadcastModalOpen, setIsBroadcastModalOpen] = useState(false);
+  const [isLinkModalOpen, setIsLinkModalOpen] = useState(false);
+  const [accounts, setAccounts] = useState<SocialAccount[]>(() => storageService.getAccounts());
+  const linkedWhatsApp = accounts.find(a => a.platform === 'whatsapp' && a.isConnected);
+
+  const handleAccountLinked = (account: SocialAccount) => {
+    const updated = storageService.saveAccount(account, auth.currentUser?.uid);
+    setAccounts(updated);
+    showToast(`Real WhatsApp account (${account.handle}) linked successfully!`);
+  };
 
   // Audio playback simulation state
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
@@ -262,10 +275,30 @@ export const WhatsAppManager: React.FC<WhatsAppManagerProps> = ({ onOpenComposer
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-sm font-bold text-slate-900">WhatsApp Messenger</h2>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-800 flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                Live +1 (555) 438-9201
-              </span>
+              {linkedWhatsApp ? (
+                <div className="flex items-center gap-1.5">
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 flex items-center gap-1 border border-emerald-200">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    <span>Real Linked: {linkedWhatsApp.handle}</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setIsLinkModalOpen(true)}
+                    className="text-[10px] font-semibold text-emerald-700 hover:text-emerald-900 hover:underline cursor-pointer"
+                  >
+                    Change
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setIsLinkModalOpen(true)}
+                  className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 hover:bg-amber-200 flex items-center gap-1 border border-amber-300 transition-colors cursor-pointer"
+                >
+                  <Plus className="w-3 h-3 text-amber-700" />
+                  <span>Link Real WhatsApp</span>
+                </button>
+              )}
             </div>
             <p className="text-[11px] text-slate-500">
               Direct message any phone number, chat in-app, share 24h statuses & broadcast
@@ -346,7 +379,7 @@ export const WhatsAppManager: React.FC<WhatsAppManagerProps> = ({ onOpenComposer
              ======================================================== */
           <div className="flex-1 flex w-full h-full overflow-hidden">
             {/* Left Chats Sidebar */}
-            <div className="w-full md:w-80 lg:w-96 bg-white border-r border-slate-200 flex flex-col shrink-0">
+            <div className={`w-full md:w-80 lg:w-96 bg-white border-r border-slate-200 flex flex-col shrink-0 ${activeChat && selectedChatId ? 'hidden md:flex' : 'flex'}`}>
               {/* Search & Filter Bar */}
               <div className="p-3 border-b border-slate-100 space-y-2 shrink-0">
                 <div className="relative">
@@ -445,17 +478,26 @@ export const WhatsAppManager: React.FC<WhatsAppManagerProps> = ({ onOpenComposer
 
             {/* Right Chat Conversation View */}
             {activeChat ? (
-              <div className="flex-1 flex flex-col bg-[#efeae2] relative min-w-0 h-full">
+              <div className={`flex-1 flex flex-col bg-[#efeae2] relative min-w-0 h-full ${!selectedChatId ? 'hidden md:flex' : 'flex'}`}>
                 {/* Chat Top Bar */}
-                <div className="h-14 px-4 bg-white border-b border-slate-200 flex items-center justify-between shrink-0 shadow-2xs z-10">
-                  <div className="flex items-center gap-3 min-w-0">
+                <div className="h-14 px-3 sm:px-4 bg-white border-b border-slate-200 flex items-center justify-between shrink-0 shadow-2xs z-10">
+                  <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                    {/* Mobile Back Button to Chat List */}
+                    <button
+                      onClick={() => setSelectedChatId('')}
+                      className="md:hidden min-h-[44px] min-w-[44px] -ml-2 flex items-center justify-center text-slate-600 hover:text-slate-900 rounded-lg cursor-pointer"
+                      aria-label="Back to conversations"
+                    >
+                      <ArrowLeft className="w-5 h-5" />
+                    </button>
+
                     <img 
                       src={activeChat.avatarUrl} 
                       alt={activeChat.contactName} 
                       className="w-9 h-9 rounded-full object-cover shrink-0" 
                     />
                     <div className="min-w-0">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5 sm:gap-2">
                         <span className="text-xs font-bold text-slate-900 truncate">
                           {activeChat.contactName}
                         </span>
@@ -465,7 +507,7 @@ export const WhatsAppManager: React.FC<WhatsAppManagerProps> = ({ onOpenComposer
                           </span>
                         )}
                       </div>
-                      <span className="text-[10px] text-slate-400 font-mono block">
+                      <span className="text-[10px] text-slate-400 font-mono block truncate">
                         {activeChat.phoneNumber} · {activeChat.isOnline ? 'Online' : 'Last seen today'}
                       </span>
                     </div>
@@ -909,6 +951,14 @@ export const WhatsAppManager: React.FC<WhatsAppManagerProps> = ({ onOpenComposer
         onClose={() => setIsBroadcastModalOpen(false)}
         chats={chats}
         onSendBroadcast={handleSendBroadcast}
+      />
+
+      {/* Real WhatsApp Account Link Up Modal */}
+      <WhatsAppLinkModal
+        isOpen={isLinkModalOpen}
+        onClose={() => setIsLinkModalOpen(false)}
+        onAccountLinked={handleAccountLinked}
+        existingAccount={linkedWhatsApp}
       />
     </div>
   );

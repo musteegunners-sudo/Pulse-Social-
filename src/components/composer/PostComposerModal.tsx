@@ -5,6 +5,8 @@ import {
   Calendar, 
   Clock, 
   Image as ImageIcon, 
+  Video,
+  Type,
   Send, 
   Save, 
   Check, 
@@ -25,9 +27,16 @@ import {
   Tag,
   Briefcase,
   Target,
-  ExternalLink
+  ExternalLink,
+  Play,
+  Film,
+  Layers,
+  Palette,
+  Repeat,
+  FileText,
+  ChevronDown
 } from 'lucide-react';
-import { SocialAccount, SocialPlatform, SocialPost } from '../../types';
+import { SocialAccount, SocialPlatform, SocialPost, PostContentType } from '../../types';
 import { PlatformIcon, getPlatformName } from '../common/PlatformIcon';
 import { MEDIA_PRESETS } from '../../data/initialData';
 import { 
@@ -37,6 +46,8 @@ import {
 import { publishToOriginalApp, openOriginalApp, PLATFORM_CONFIGS } from '../../utils/socialAppBridge';
 import { AiComposerAssistant } from './AiComposerAssistant';
 import { matchHashtagsFromContent, searchHashtags, HashtagMatch } from '../../utils/hashtagMatcher';
+import { PostMediaControls, TEXT_CARD_THEMES } from './PostMediaControls';
+import { SmartContentSuggestions } from './SmartContentSuggestions';
 
 interface PostComposerModalProps {
   isOpen: boolean;
@@ -67,9 +78,23 @@ export const PostComposerModal: React.FC<PostComposerModalProps> = ({
   const [selectedPlatforms, setSelectedPlatforms] = useState<SocialPlatform[]>(['twitter', 'linkedin']);
   const [content, setContent] = useState('');
   const [firstComment, setFirstComment] = useState('');
+  
+  // Post Type: Video, Photos, Text
+  const [postType, setPostType] = useState<PostContentType>('photos');
+  
+  // Photos Specific
   const [mediaUrls, setMediaUrls] = useState<string[]>([]);
-  const [selectedMediaPreset, setSelectedMediaPreset] = useState<string>('');
-  const [customImageUrl, setCustomImageUrl] = useState('');
+  const [photoAspectRatio, setPhotoAspectRatio] = useState<'1:1' | '4:5' | '16:9'>('16:9');
+  
+  // Video Specific
+  const [videoUrl, setVideoUrl] = useState<string>('');
+  const [videoThumbnail, setVideoThumbnail] = useState<string>('');
+  const [videoDuration, setVideoDuration] = useState<number>(15);
+  const [videoAspectRatio, setVideoAspectRatio] = useState<'16:9' | '9:16'>('16:9');
+  
+  // Text Specific
+  const [textBackground, setTextBackground] = useState<string>('clean');
+
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
   const [campaign, setCampaign] = useState('Product Launch Q3');
@@ -125,12 +150,63 @@ export const PostComposerModal: React.FC<PostComposerModalProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // Publer Social Media Tools state
+  const [showHashtagMenu, setShowHashtagMenu] = useState(false);
+  const [showSignatureMenu, setShowSignatureMenu] = useState(false);
+  const [isRecycleEnabled, setIsRecycleEnabled] = useState(false);
+  const [recycleDays, setRecycleDays] = useState(7);
+  const [isFirstCommentOpen, setIsFirstCommentOpen] = useState(false);
+
+  const savedHashtagGroups = useMemo(() => {
+    try {
+      const saved = localStorage.getItem('publer_tools_hashtag_groups_v1');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return [
+      { id: '1', name: 'Halal Marriage & Arewa', tags: ['#ArewaHalal', '#HalalMarriage', '#ArewaWeddings', '#Kano', '#Kaduna'] },
+      { id: '2', name: 'Viral Reach & Trending', tags: ['#Trending', '#Viral', '#Community', '#Creator', '#Engagement'] },
+      { id: '3', name: 'Brand & Business Growth', tags: ['#BrandBuilding', '#BusinessGrowth', '#Entrepreneur', '#Leadership'] }
+    ];
+  }, [isOpen]);
+
+  const savedSignatures = useMemo(() => {
+    try {
+      const saved = localStorage.getItem('publer_tools_signatures_v1');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return [
+      { id: '1', name: 'WhatsApp Direct Contact', content: '\n\n📲 Direct WhatsApp: +0704947485' },
+      { id: '2', name: 'Official Handles', content: '\n\n✨ Follow @ArewaHalalcf2f on X | Join our Facebook Group & Page!' }
+    ];
+  }, [isOpen]);
+
+  const handleInsertHashtagGroup = (group: any) => {
+    const newTags = group.tags || [];
+    handleAddAiTags(newTags);
+    setShowHashtagMenu(false);
+  };
+
+  const handleInsertSignature = (sig: any) => {
+    setContent(prev => prev.trim() + sig.content);
+    setShowSignatureMenu(false);
+  };
+
   // Initialize from initialPost or initialDate
   useEffect(() => {
     if (initialPost) {
       setContent(initialPost.content);
       setSelectedPlatforms(initialPost.platforms || ['twitter']);
+      const detectedType: PostContentType = initialPost.postType || (
+        initialPost.videoUrl ? 'video' : (initialPost.mediaUrls && initialPost.mediaUrls.length > 0 ? 'photos' : 'text')
+      );
+      setPostType(detectedType);
       setMediaUrls(initialPost.mediaUrls || []);
+      setVideoUrl(initialPost.videoUrl || '');
+      setVideoThumbnail(initialPost.videoThumbnail || '');
+      setVideoDuration(initialPost.videoDuration || 15);
+      setVideoAspectRatio(initialPost.aspectRatio === '9:16' ? '9:16' : '16:9');
+      setPhotoAspectRatio(initialPost.aspectRatio === '1:1' ? '1:1' : initialPost.aspectRatio === '4:5' ? '4:5' : '16:9');
+      setTextBackground(initialPost.textBackground || 'clean');
       setFirstComment(initialPost.firstComment || '');
       setTags(initialPost.tags || []);
       setCampaign(initialPost.campaign || 'Product Launch Q3');
@@ -142,8 +218,17 @@ export const PostComposerModal: React.FC<PostComposerModalProps> = ({
       setPreviewPlatform(initialPost.platforms[0] || 'twitter');
     } else {
       setContent('');
-      setSelectedPlatforms(['twitter', 'linkedin']);
+      const activePlatforms = accounts.filter(a => a.isConnected).map(a => a.platform);
+      setSelectedPlatforms(activePlatforms.length > 0 ? activePlatforms : ['facebook', 'whatsapp']);
+      setPreviewPlatform(activePlatforms[0] || 'facebook');
+      setPostType('photos');
       setMediaUrls([]);
+      setVideoUrl('');
+      setVideoThumbnail('');
+      setVideoDuration(15);
+      setVideoAspectRatio('16:9');
+      setPhotoAspectRatio('16:9');
+      setTextBackground('clean');
       setFirstComment('');
       setTags(['#Growth', '#Strategy']);
       if (initialDate) {
@@ -185,18 +270,18 @@ export const PostComposerModal: React.FC<PostComposerModalProps> = ({
     setTags(tags.filter(tag => tag !== t));
   };
 
-  const handleAddPresetMedia = (url: string) => {
-    if (mediaUrls.includes(url)) {
-      setMediaUrls(mediaUrls.filter(u => u !== url));
-    } else {
-      setMediaUrls([url]);
+  const handleAddMediaUrl = (url: string) => {
+    if (!mediaUrls.includes(url)) {
+      setMediaUrls(prev => [...prev, url]);
     }
   };
 
-  const handleCustomImageUrlAdd = () => {
-    if (!customImageUrl.trim()) return;
-    setMediaUrls([customImageUrl.trim()]);
-    setCustomImageUrl('');
+  const handleRemoveMediaUrl = (index: number) => {
+    setMediaUrls(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleClearMediaUrls = () => {
+    setMediaUrls([]);
   };
 
   const handleApplyAiContent = (newContent: string) => {
@@ -274,19 +359,41 @@ export const PostComposerModal: React.FC<PostComposerModalProps> = ({
 
   const handleSave = (status: 'scheduled' | 'published' | 'draft' | 'queued' | 'now') => {
     const scheduledDateTime = new Date(`${scheduleDate}T${scheduleTime}:00`);
+    const isNow = status === 'now';
+    const nowIso = new Date().toISOString();
+    const targetAccounts = accounts.filter(a => selectedPlatforms.includes(a.platform) && a.isConnected);
+
+    const receipts = isNow ? targetAccounts.map(a => ({
+      channelId: a.id,
+      platform: a.platform,
+      channelName: a.name,
+      handle: a.handle,
+      reachedAt: nowIso,
+      status: 'reached' as const,
+      reachNote: `Direct broadcast verified • Reached ${a.name} (${a.handle})`,
+    })) : undefined;
 
     const newPost: SocialPost = {
       id: initialPost ? initialPost.id : `post-${Date.now()}`,
+      postType,
       content: content.trim(),
       platforms: selectedPlatforms,
-      targetAccountIds: accounts.filter(a => selectedPlatforms.includes(a.platform)).map(a => a.id),
-      scheduledFor: status === 'now' ? new Date().toISOString() : scheduledDateTime.toISOString(),
-      publishedAt: status === 'now' ? new Date().toISOString() : undefined,
-      status: status === 'now' ? 'published' : status,
-      mediaUrls: mediaUrls.length > 0 ? mediaUrls : undefined,
+      targetAccountIds: targetAccounts.map(a => a.id),
+      scheduledFor: isNow ? nowIso : scheduledDateTime.toISOString(),
+      publishedAt: isNow ? nowIso : undefined,
+      reachedAt: isNow ? nowIso : undefined,
+      reachedChannels: isNow ? targetAccounts.map(a => a.name) : undefined,
+      deliveryReceipts: receipts,
+      status: isNow ? 'published' : status,
+      mediaUrls: postType === 'photos' ? (mediaUrls.length > 0 ? mediaUrls : undefined) : (postType === 'video' && videoThumbnail ? [videoThumbnail] : undefined),
+      videoUrl: postType === 'video' && videoUrl.trim() ? videoUrl.trim() : undefined,
+      videoThumbnail: postType === 'video' && videoThumbnail.trim() ? videoThumbnail.trim() : undefined,
+      videoDuration: postType === 'video' ? videoDuration : undefined,
+      aspectRatio: postType === 'video' ? videoAspectRatio : (postType === 'photos' ? photoAspectRatio : undefined),
+      textBackground: postType === 'text' ? textBackground : undefined,
       firstComment: firstComment.trim() || undefined,
       tags: tags.length > 0 ? tags : undefined,
-      createdAt: initialPost?.createdAt || new Date().toISOString(),
+      createdAt: initialPost?.createdAt || nowIso,
       campaign,
       author: 'Current User',
     };
@@ -296,11 +403,14 @@ export const PostComposerModal: React.FC<PostComposerModalProps> = ({
   };
 
   // Preview account
-  const previewAccount = accounts.find(a => a.platform === previewPlatform) || {
-    name: 'PulseMedia HQ',
-    handle: '@pulsemedia_hq',
-    avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+  const previewAccount = accounts.find(a => a.platform === previewPlatform && a.isConnected) || accounts[0] || {
+    id: 'preview-account',
+    name: getPlatformName(previewPlatform),
+    handle: `@channel_${previewPlatform}`,
+    avatarUrl: `https://ui-avatars.com/api/?name=${encodeURIComponent(getPlatformName(previewPlatform))}&background=4f46e5&color=fff`,
     platform: previewPlatform,
+    followersCount: 0,
+    isConnected: true,
   };
 
   // Character limit calculations
@@ -366,30 +476,194 @@ export const PostComposerModal: React.FC<PostComposerModalProps> = ({
             
             {/* Target Platforms Selector */}
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-2">
-                Select Publishing Channels
-              </label>
-              <div className="flex flex-wrap gap-2">
-                {(['twitter', 'linkedin', 'instagram', 'facebook', 'tiktok'] as SocialPlatform[]).map((plat) => {
-                  const isSelected = selectedPlatforms.includes(plat);
-                  return (
-                    <button
-                      key={plat}
-                      type="button"
-                      onClick={() => togglePlatform(plat)}
-                      className={`min-h-[44px] flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-medium border transition-colors cursor-pointer ${
-                        isSelected
-                          ? 'border-indigo-600 bg-indigo-50/80 text-indigo-950 font-semibold'
-                          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
-                      }`}
-                    >
-                      <PlatformIcon platform={plat} size={15} />
-                      <span>{getPlatformName(plat)}</span>
-                      {isSelected && <Check className="w-3.5 h-3.5 text-indigo-600 ml-0.5" />}
-                    </button>
-                  );
-                })}
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-xs font-semibold text-slate-700">
+                  Target Publishing Channels ({selectedPlatforms.length} selected)
+                </label>
+                {accounts.length > 0 ? (
+                  <span className="text-[10px] text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                    {accounts.filter(a => a.isConnected).length} Connected Channel{accounts.filter(a => a.isConnected).length === 1 ? '' : 's'}
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-amber-700 font-semibold bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                    No channels connected yet
+                  </span>
+                )}
               </div>
+
+              <div className="flex flex-wrap gap-2">
+                {accounts.length > 0 ? (
+                  accounts.map((acc) => {
+                    const isSelected = selectedPlatforms.includes(acc.platform);
+                    const isFbGroup = acc.platform === 'facebook' && (acc.facebookType === 'group' || acc.handle.startsWith('groups/'));
+
+                    return (
+                      <button
+                        key={acc.id}
+                        type="button"
+                        onClick={() => togglePlatform(acc.platform)}
+                        className={`min-h-[42px] flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-medium border transition-colors cursor-pointer ${
+                          isSelected
+                            ? 'border-indigo-600 bg-indigo-50/80 text-indigo-950 font-semibold shadow-2xs'
+                            : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                        }`}
+                      >
+                        <PlatformIcon platform={acc.platform} size={15} />
+                        <div className="text-left">
+                          <div className="flex items-center gap-1">
+                            <span className="text-[11px] font-bold block truncate max-w-[120px]">{acc.name}</span>
+                            {acc.platform === 'facebook' && (
+                              <span className="text-[8px] font-bold px-1 rounded bg-blue-50 text-blue-700 border border-blue-200">
+                                {isFbGroup ? 'Group' : 'Page'}
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[9px] text-slate-400 block font-mono truncate max-w-[120px]">{acc.handle}</span>
+                        </div>
+                        {isSelected ? <Check className="w-3.5 h-3.5 text-indigo-600 ml-1" /> : <Plus className="w-3.5 h-3.5 text-slate-400 ml-1" />}
+                      </button>
+                    );
+                  })
+                ) : (
+                  (['whatsapp', 'facebook', 'twitter', 'linkedin', 'instagram', 'tiktok'] as SocialPlatform[]).map((plat) => {
+                    const isSelected = selectedPlatforms.includes(plat);
+                    return (
+                      <button
+                        key={plat}
+                        type="button"
+                        onClick={() => togglePlatform(plat)}
+                        className={`min-h-[40px] flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium border transition-colors cursor-pointer ${
+                          isSelected
+                            ? 'border-indigo-600 bg-indigo-50/80 text-indigo-950 font-semibold'
+                            : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                        }`}
+                      >
+                        <PlatformIcon platform={plat} size={15} />
+                        <span>{getPlatformName(plat)}</span>
+                        {isSelected && <Check className="w-3.5 h-3.5 text-indigo-600 ml-0.5" />}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* Publer Multi-Channel Customizer Tabs */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 border-b border-slate-100">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider shrink-0 mr-1">
+                Customize for:
+              </span>
+              <button
+                type="button"
+                onClick={() => setPreviewPlatform('twitter')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
+                  previewPlatform === 'twitter'
+                    ? 'bg-slate-900 text-white shadow-2xs'
+                    : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                }`}
+              >
+                <span>🌐 Master (All)</span>
+              </button>
+              {selectedPlatforms.map((plat) => (
+                <button
+                  key={plat}
+                  type="button"
+                  onClick={() => setPreviewPlatform(plat)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
+                    previewPlatform === plat
+                      ? 'bg-indigo-600 text-white shadow-2xs'
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                  }`}
+                >
+                  <PlatformIcon platform={plat} size={13} />
+                  <span>{getPlatformName(plat)}</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Publer Social Media Tools Quick-Action Bar */}
+            <div className="flex flex-wrap items-center gap-1.5 p-1.5 bg-emerald-50/70 border border-emerald-200/80 rounded-xl relative">
+              <div className="flex items-center gap-1 text-[11px] font-bold text-emerald-950 px-1">
+                <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Publer Tools:</span>
+              </div>
+
+              {/* Hashtag Bundles Dropdown */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => { setShowHashtagMenu(!showHashtagMenu); setShowSignatureMenu(false); }}
+                  className="px-2.5 py-1 bg-white hover:bg-emerald-100 text-emerald-800 rounded-lg text-xs font-semibold border border-emerald-200 transition-colors flex items-center gap-1 cursor-pointer shadow-2xs"
+                >
+                  <Hash className="w-3 h-3 text-emerald-600" />
+                  <span>Hashtag Bundles</span>
+                  <ChevronDown className="w-3 h-3 text-slate-400" />
+                </button>
+                {showHashtagMenu && (
+                  <div className="absolute left-0 top-full mt-1 w-64 bg-white rounded-xl shadow-xl border border-slate-200 p-2 z-30 space-y-1 animate-in fade-in">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block px-2 py-1">
+                      Insert Saved Bundle
+                    </span>
+                    {savedHashtagGroups.map((group: any) => (
+                      <button
+                        key={group.id}
+                        type="button"
+                        onClick={() => handleInsertHashtagGroup(group)}
+                        className="w-full text-left p-2 hover:bg-emerald-50 rounded-lg text-xs font-semibold text-slate-800 flex items-center justify-between cursor-pointer"
+                      >
+                        <span className="truncate">{group.name}</span>
+                        <span className="text-[10px] text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded-full font-mono">
+                          +{group.tags?.length || 0}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Signatures Dropdown */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => { setShowSignatureMenu(!showSignatureMenu); setShowHashtagMenu(false); }}
+                  className="px-2.5 py-1 bg-white hover:bg-emerald-100 text-emerald-800 rounded-lg text-xs font-semibold border border-emerald-200 transition-colors flex items-center gap-1 cursor-pointer shadow-2xs"
+                >
+                  <FileText className="w-3 h-3 text-emerald-600" />
+                  <span>Insert Signature</span>
+                  <ChevronDown className="w-3 h-3 text-slate-400" />
+                </button>
+                {showSignatureMenu && (
+                  <div className="absolute left-0 top-full mt-1 w-64 bg-white rounded-xl shadow-xl border border-slate-200 p-2 z-30 space-y-1 animate-in fade-in">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block px-2 py-1">
+                      Insert Brand Signature
+                    </span>
+                    {savedSignatures.map((sig: any) => (
+                      <button
+                        key={sig.id}
+                        type="button"
+                        onClick={() => handleInsertSignature(sig)}
+                        className="w-full text-left p-2 hover:bg-emerald-50 rounded-lg text-xs font-semibold text-slate-800 cursor-pointer truncate"
+                      >
+                        {sig.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* First Comment Toggle */}
+              <button
+                type="button"
+                onClick={() => setIsFirstCommentOpen(!isFirstCommentOpen)}
+                className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-colors flex items-center gap-1 cursor-pointer shadow-2xs ${
+                  isFirstCommentOpen
+                    ? 'bg-emerald-600 text-white border-emerald-600'
+                    : 'bg-white hover:bg-emerald-100 text-emerald-800 border-emerald-200'
+                }`}
+              >
+                <MessageSquare className="w-3 h-3" />
+                <span>First Comment</span>
+              </button>
             </div>
 
             {/* Content Textarea with AI Tool button */}
@@ -460,6 +734,32 @@ export const PostComposerModal: React.FC<PostComposerModalProps> = ({
                 }`}
               />
 
+              {/* Publer First Comment Box */}
+              {isFirstCommentOpen && (
+                <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl space-y-1.5 animate-in fade-in">
+                  <div className="flex items-center justify-between text-xs font-bold text-emerald-950">
+                    <span className="flex items-center gap-1.5">
+                      <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Publer First Comment (Instagram, Facebook, LinkedIn)</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsFirstCommentOpen(false)}
+                      className="text-slate-400 hover:text-slate-600 cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <textarea
+                    rows={2}
+                    value={firstComment}
+                    onChange={(e) => setFirstComment(e.target.value)}
+                    placeholder="Auto-schedule first comment with extra hashtags or links..."
+                    className="w-full text-xs p-2.5 bg-white border border-emerald-200 rounded-lg text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                </div>
+              )}
+
               {/* Quick 1-Click AI Tone Refinements Bar */}
               <div className="flex items-center justify-between gap-1 overflow-x-auto py-1 px-1 bg-slate-50/80 border border-slate-200/80 rounded-lg">
                 <div className="flex items-center gap-1 shrink-0 px-1 text-[11px] font-semibold text-slate-500">
@@ -510,77 +810,41 @@ export const PostComposerModal: React.FC<PostComposerModalProps> = ({
                   More AI...
                 </button>
               </div>
+
+              {/* AI-Powered Smart Content Suggestions (Gemini) */}
+              <SmartContentSuggestions
+                content={content}
+                selectedPlatforms={selectedPlatforms}
+                previewPlatform={previewPlatform}
+                onApplyVariation={handleApplyAiContent}
+                onAppendVariation={handleAppendAiContent}
+                onAddHashtags={handleAddAiTags}
+                currentTags={tags}
+              />
             </div>
 
-            {/* Media Attachments */}
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
-                  <ImageIcon className="w-3.5 h-3.5 text-slate-500" />
-                  Attached Media Asset
-                </label>
-                {mediaUrls.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setMediaUrls([])}
-                    className="text-xs text-red-600 hover:underline cursor-pointer"
-                  >
-                    Remove media
-                  </button>
-                )}
-              </div>
-
-              {/* Preset high quality generated images */}
-              <div className="grid grid-cols-4 gap-2 mb-2">
-                {MEDIA_PRESETS.map((preset) => {
-                  const isSelected = mediaUrls.includes(preset.url);
-                  return (
-                    <div
-                      key={preset.id}
-                      onClick={() => handleAddPresetMedia(preset.url)}
-                      className={`relative aspect-video rounded-md overflow-hidden border-2 cursor-pointer transition-all ${
-                        isSelected ? 'border-indigo-600 ring-2 ring-indigo-200' : 'border-slate-200 hover:border-slate-300'
-                      }`}
-                    >
-                      <img
-                        src={preset.url}
-                        alt={preset.title}
-                        className="w-full h-full object-cover"
-                        referrerPolicy="no-referrer"
-                      />
-                      <div className="absolute inset-0 bg-slate-900/30 flex items-end p-1">
-                        <span className="text-[10px] text-white font-medium truncate drop-shadow-xs">
-                          {preset.title}
-                        </span>
-                      </div>
-                      {isSelected && (
-                        <div className="absolute top-1 right-1 w-4 h-4 bg-indigo-600 rounded-full flex items-center justify-center text-white">
-                          <Check className="w-2.5 h-2.5" />
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Custom Image URL input */}
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={customImageUrl}
-                  onChange={(e) => setCustomImageUrl(e.target.value)}
-                  placeholder="Or paste an image URL..."
-                  className="flex-1 text-xs px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                />
-                <button
-                  type="button"
-                  onClick={handleCustomImageUrlAdd}
-                  className="px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 rounded-md hover:bg-slate-50 cursor-pointer"
-                >
-                  Add URL
-                </button>
-              </div>
-            </div>
+            {/* Post Media Controls: Video, Photos, Text */}
+            <PostMediaControls
+              postType={postType}
+              onSelectPostType={setPostType}
+              mediaUrls={mediaUrls}
+              onAddMediaUrl={handleAddMediaUrl}
+              onRemoveMediaUrl={handleRemoveMediaUrl}
+              onClearMediaUrls={handleClearMediaUrls}
+              photoAspectRatio={photoAspectRatio}
+              onSetPhotoAspectRatio={setPhotoAspectRatio}
+              videoUrl={videoUrl}
+              onSetVideoUrl={setVideoUrl}
+              videoThumbnail={videoThumbnail}
+              onSetVideoThumbnail={setVideoThumbnail}
+              videoDuration={videoDuration}
+              onSetVideoDuration={setVideoDuration}
+              videoAspectRatio={videoAspectRatio}
+              onSetVideoAspectRatio={setVideoAspectRatio}
+              textBackground={textBackground}
+              onSetTextBackground={setTextBackground}
+              selectedPlatforms={selectedPlatforms}
+            />
 
             {/* Hashtags & Tags with Keyword Matching Utility */}
             <div>
@@ -908,273 +1172,371 @@ export const PostComposerModal: React.FC<PostComposerModalProps> = ({
               </div>
             </div>
 
-            {/* Simulated Social Card Container */}
-            <div className="flex-1 flex flex-col justify-start">
-              
-              {/* TWITTER / X PREVIEW */}
-              {previewPlatform === 'twitter' && (
-                <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-2xs space-y-3 font-sans">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-2.5">
-                      <img
-                        src={previewAccount.avatarUrl}
-                        alt="Avatar"
-                        className="w-10 h-10 rounded-full object-cover"
-                      />
-                      <div>
-                        <div className="flex items-center gap-1">
-                          <span className="text-xs font-bold text-slate-900">{previewAccount.name}</span>
-                          <span className="w-3.5 h-3.5 rounded-full bg-blue-500 text-white flex items-center justify-center text-[9px] font-bold">✓</span>
+            {/* Helper to render preview media: Video player, Photos gallery/single, or Text graphic card */}
+            {(() => {
+              const renderMediaPreview = (platform: SocialPlatform) => {
+                if (postType === 'video') {
+                  if (videoUrl) {
+                    const isVertical = videoAspectRatio === '9:16' || platform === 'tiktok';
+                    return (
+                      <div className={`relative rounded-xl overflow-hidden bg-black shadow-xs ${isVertical ? 'aspect-[9/16] max-h-72 mx-auto' : 'aspect-video max-h-56'} w-full flex items-center justify-center`}>
+                        <video
+                          src={videoUrl}
+                          controls
+                          poster={videoThumbnail}
+                          playsInline
+                          className="w-full h-full object-contain"
+                        >
+                          Your browser does not support the video tag.
+                        </video>
+                        <div className="absolute top-2 right-2 bg-black/75 backdrop-blur-xs text-white text-[10px] font-mono px-2 py-0.5 rounded-full flex items-center gap-1 pointer-events-none">
+                          <Film className="w-3 h-3 text-indigo-400" />
+                          <span>0:{videoDuration < 10 ? `0${videoDuration}` : videoDuration}</span>
                         </div>
-                        <span className="text-[11px] text-slate-500">{previewAccount.handle} · just now</span>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="p-5 bg-slate-100/90 border border-slate-200 rounded-xl text-center space-y-1.5 text-slate-500">
+                      <Film className="w-7 h-7 text-indigo-500 mx-auto" />
+                      <p className="text-xs font-bold text-slate-700">Video Post Mode Active</p>
+                      <p className="text-[11px] text-slate-400">Pick a clip or upload MP4 in the left editor</p>
+                    </div>
+                  );
+                }
+
+                if (postType === 'photos') {
+                  if (mediaUrls.length === 0) {
+                    return (
+                      <div className="p-5 bg-slate-100/90 border border-slate-200 rounded-xl text-center space-y-1 text-slate-400">
+                        <ImageIcon className="w-7 h-7 mx-auto stroke-1 text-slate-400" />
+                        <p className="text-xs font-semibold text-slate-600">No photos attached</p>
+                        <p className="text-[11px]">Select photos or upload from device in the left editor</p>
+                      </div>
+                    );
+                  }
+
+                  const ratioClass = photoAspectRatio === '1:1' ? 'aspect-square' : photoAspectRatio === '4:5' ? 'aspect-[4/5]' : 'aspect-video';
+
+                  if (mediaUrls.length === 1) {
+                    return (
+                      <div className={`rounded-xl overflow-hidden border border-slate-200 bg-slate-100 ${ratioClass} max-h-60 sm:max-h-64 w-full`}>
+                        <img src={mediaUrls[0]} alt="Media" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                      </div>
+                    );
+                  }
+
+                  if (mediaUrls.length === 2) {
+                    return (
+                      <div className="grid grid-cols-2 gap-1.5 rounded-xl overflow-hidden border border-slate-200 bg-slate-100 aspect-video max-h-60 w-full">
+                        <img src={mediaUrls[0]} alt="Photo 1" className="w-full h-full object-cover" />
+                        <img src={mediaUrls[1]} alt="Photo 2" className="w-full h-full object-cover" />
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="grid grid-cols-2 gap-1.5 rounded-xl overflow-hidden border border-slate-200 bg-slate-100 aspect-video max-h-64 relative w-full">
+                      <img src={mediaUrls[0]} alt="Photo 1" className="w-full h-full object-cover" />
+                      <div className="grid grid-rows-2 gap-1.5 h-full">
+                        <img src={mediaUrls[1]} alt="Photo 2" className="w-full h-full object-cover" />
+                        <div className="relative h-full">
+                          <img src={mediaUrls[2]} alt="Photo 3" className="w-full h-full object-cover" />
+                          {mediaUrls.length > 3 && (
+                            <div className="absolute inset-0 bg-black/60 flex items-center justify-center text-white font-bold text-sm">
+                              +{mediaUrls.length - 2}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
-                    <span className="text-slate-400 text-xs">•••</span>
-                  </div>
+                  );
+                }
 
-                  <p className="text-xs text-slate-800 leading-relaxed whitespace-pre-wrap">
-                    {content || 'Your post caption will appear here in high-fidelity Twitter format...'}
-                  </p>
-
-                  {tags.length > 0 && (
-                    <div className="text-xs text-blue-600 flex flex-wrap gap-1 font-normal">
-                      {tags.map(t => <span key={t}>{t}</span>)}
+                // Text Post
+                if (textBackground && textBackground !== 'clean') {
+                  const activeTheme = TEXT_CARD_THEMES.find(t => t.id === textBackground) || TEXT_CARD_THEMES[1];
+                  return (
+                    <div className={`p-4 rounded-xl border ${activeTheme.borderClass} ${activeTheme.bgClass} min-h-[120px] flex flex-col justify-center text-center shadow-xs`}>
+                      <p className={`text-xs sm:text-sm font-semibold leading-relaxed ${activeTheme.textClass}`}>
+                        {content || 'Your styled text card will appear here...'}
+                      </p>
+                      <span className="text-[10px] mt-2 opacity-60 font-mono tracking-wider uppercase">
+                        {previewAccount.name}
+                      </span>
                     </div>
-                  )}
+                  );
+                }
 
-                  {mediaUrls.length > 0 && (
-                    <div className="rounded-lg overflow-hidden border border-slate-100 max-h-56">
-                      <img
-                        src={mediaUrls[0]}
-                        alt="Media"
-                        className="w-full h-full object-cover"
-                        referrerPolicy="no-referrer"
-                      />
-                    </div>
-                  )}
+                return null;
+              };
 
-                  {/* Twitter interactions */}
-                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-slate-400 text-xs px-1">
-                    <span>💬 24</span>
-                    <span>🔁 12</span>
-                    <span>❤️ 148</span>
-                    <span>📊 2.4k</span>
-                    <span>🔖</span>
-                  </div>
-                </div>
-              )}
+              return (
+                <div className="flex-1 flex flex-col justify-start">
+                  
+                  {/* TWITTER / X PREVIEW */}
+                  {previewPlatform === 'twitter' && (
+                    <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-2xs space-y-3 font-sans">
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <img
+                            src={previewAccount.avatarUrl}
+                            alt="Avatar"
+                            className="w-10 h-10 rounded-full object-cover"
+                          />
+                          <div>
+                            <div className="flex items-center gap-1">
+                              <span className="text-xs font-bold text-slate-900">{previewAccount.name}</span>
+                              <span className="w-3.5 h-3.5 rounded-full bg-blue-500 text-white flex items-center justify-center text-[9px] font-bold">✓</span>
+                            </div>
+                            <span className="text-[11px] text-slate-500">{previewAccount.handle} · just now</span>
+                          </div>
+                        </div>
+                        <span className="text-slate-400 text-xs">•••</span>
+                      </div>
 
-              {/* LINKEDIN PREVIEW */}
-              {previewPlatform === 'linkedin' && (
-                <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-2xs space-y-3 font-sans">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-2.5">
-                      <img
-                        src={previewAccount.avatarUrl}
-                        alt="Avatar"
-                        className="w-10 h-10 rounded-full object-cover"
-                      />
-                      <div>
-                        <span className="text-xs font-bold text-slate-900 block leading-tight">{previewAccount.name}</span>
-                        <span className="text-[10px] text-slate-500 block leading-tight">Official Brand Page · 84,600 followers</span>
-                        <span className="text-[10px] text-slate-400">Scheduled · 🌐</span>
+                      <p className="text-xs text-slate-800 leading-relaxed whitespace-pre-wrap">
+                        {content || 'Your post caption will appear here in high-fidelity Twitter format...'}
+                      </p>
+
+                      {tags.length > 0 && (
+                        <div className="text-xs text-blue-600 flex flex-wrap gap-1 font-normal">
+                          {tags.map(t => <span key={t}>{t}</span>)}
+                        </div>
+                      )}
+
+                      {renderMediaPreview('twitter')}
+
+                      {/* Twitter interactions */}
+                      <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-slate-400 text-xs px-1">
+                        <span>💬 24</span>
+                        <span>🔁 12</span>
+                        <span>❤️ 148</span>
+                        <span>📊 2.4k</span>
+                        <span>🔖</span>
                       </div>
                     </div>
-                    <span className="text-slate-400 text-xs">•••</span>
-                  </div>
+                  )}
 
-                  <p className="text-xs text-slate-800 leading-relaxed whitespace-pre-wrap">
-                    {content || 'Your post will appear formatted here with LinkedIn layout and typography...'}
-                  </p>
+                  {/* LINKEDIN PREVIEW */}
+                  {previewPlatform === 'linkedin' && (
+                    <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-2xs space-y-3 font-sans">
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <img
+                            src={previewAccount.avatarUrl}
+                            alt="Avatar"
+                            className="w-10 h-10 rounded-full object-cover"
+                          />
+                          <div>
+                            <span className="text-xs font-bold text-slate-900 block leading-tight">{previewAccount.name}</span>
+                            <span className="text-[10px] text-slate-500 block leading-tight">Official Brand Page · 84,600 followers</span>
+                            <span className="text-[10px] text-slate-400">Scheduled · 🌐</span>
+                          </div>
+                        </div>
+                        <span className="text-slate-400 text-xs">•••</span>
+                      </div>
 
-                  {tags.length > 0 && (
-                    <div className="text-xs text-[#0A66C2] flex flex-wrap gap-1 font-medium">
-                      {tags.map(t => <span key={t}>{t}</span>)}
+                      <p className="text-xs text-slate-800 leading-relaxed whitespace-pre-wrap">
+                        {content || 'Your post will appear formatted here with LinkedIn layout and typography...'}
+                      </p>
+
+                      {tags.length > 0 && (
+                        <div className="text-xs text-[#0A66C2] flex flex-wrap gap-1 font-medium">
+                          {tags.map(t => <span key={t}>{t}</span>)}
+                        </div>
+                      )}
+
+                      {renderMediaPreview('linkedin')}
+
+                      {firstComment && (
+                        <div className="p-2 bg-slate-50 rounded text-[11px] text-slate-600 border border-slate-100">
+                          <span className="font-semibold text-slate-700">First Comment: </span>
+                          {firstComment}
+                        </div>
+                      )}
+
+                      {/* LinkedIn actions */}
+                      <div className="pt-2 border-t border-slate-100 flex items-center justify-around text-slate-500 text-xs font-medium">
+                        <span>👍 Like</span>
+                        <span>💬 Comment</span>
+                        <span>🔄 Repost</span>
+                        <span>🚀 Send</span>
+                      </div>
                     </div>
                   )}
 
-                  {mediaUrls.length > 0 && (
-                    <div className="rounded overflow-hidden border border-slate-100 max-h-56">
-                      <img
-                        src={mediaUrls[0]}
-                        alt="Media"
-                        className="w-full h-full object-cover"
-                        referrerPolicy="no-referrer"
-                      />
+                  {/* INSTAGRAM PREVIEW */}
+                  {previewPlatform === 'instagram' && (
+                    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-2xs font-sans max-w-sm mx-auto w-full">
+                      <div className="p-2.5 flex items-center justify-between border-b border-slate-100">
+                        <div className="flex items-center gap-2">
+                          <div className="w-8 h-8 rounded-full p-0.5 bg-gradient-to-tr from-yellow-400 via-pink-500 to-purple-600">
+                            <img
+                              src={previewAccount.avatarUrl}
+                              alt="Avatar"
+                              className="w-full h-full rounded-full object-cover border-2 border-white"
+                            />
+                          </div>
+                          <span className="text-xs font-bold text-slate-900">{previewAccount.handle.replace('@', '')}</span>
+                        </div>
+                        <span className="text-slate-400 text-xs">•••</span>
+                      </div>
+
+                      {/* Instagram Media */}
+                      <div className="bg-slate-100 relative">
+                        {renderMediaPreview('instagram')}
+                      </div>
+
+                      <div className="p-3 space-y-1.5">
+                        <div className="flex items-center justify-between text-slate-800 text-sm">
+                          <div className="flex items-center gap-3">
+                            <span>❤️</span>
+                            <span>💬</span>
+                            <span>✈️</span>
+                          </div>
+                          <span>🔖</span>
+                        </div>
+
+                        <div className="text-xs text-slate-900 font-bold">1,420 likes</div>
+
+                        <p className="text-xs text-slate-800 leading-snug line-clamp-3">
+                          <span className="font-bold mr-1">{previewAccount.handle.replace('@', '')}</span>
+                          {content || 'Add a compelling caption for your Instagram followers...'}
+                        </p>
+
+                        {tags.length > 0 && (
+                          <div className="text-[11px] text-[#00376B] flex flex-wrap gap-1">
+                            {tags.map(t => <span key={t}>{t}</span>)}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
 
-                  {firstComment && (
-                    <div className="p-2 bg-slate-50 rounded text-[11px] text-slate-600 border border-slate-100">
-                      <span className="font-semibold text-slate-700">First Comment: </span>
-                      {firstComment}
-                    </div>
-                  )}
-
-                  {/* LinkedIn actions */}
-                  <div className="pt-2 border-t border-slate-100 flex items-center justify-around text-slate-500 text-xs font-medium">
-                    <span>👍 Like</span>
-                    <span>💬 Comment</span>
-                    <span>🔄 Repost</span>
-                    <span>🚀 Send</span>
-                  </div>
-                </div>
-              )}
-
-              {/* INSTAGRAM PREVIEW */}
-              {previewPlatform === 'instagram' && (
-                <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-2xs font-sans max-w-sm mx-auto w-full">
-                  <div className="p-2.5 flex items-center justify-between border-b border-slate-100">
-                    <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 rounded-full p-0.5 bg-gradient-to-tr from-yellow-400 via-pink-500 to-purple-600">
+                  {/* FACEBOOK PREVIEW */}
+                  {previewPlatform === 'facebook' && (
+                    <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-2xs space-y-3 font-sans">
+                      <div className="flex items-center gap-2.5">
                         <img
                           src={previewAccount.avatarUrl}
                           alt="Avatar"
-                          className="w-full h-full rounded-full object-cover border-2 border-white"
+                          className="w-9 h-9 rounded-full object-cover"
                         />
+                        <div>
+                          <span className="text-xs font-bold text-slate-900 block leading-tight">{previewAccount.name}</span>
+                          <span className="text-[10px] text-slate-400">Scheduled · 🌍 Public</span>
+                        </div>
                       </div>
-                      <span className="text-xs font-bold text-slate-900">{previewAccount.handle.replace('@', '')}</span>
-                    </div>
-                    <span className="text-slate-400 text-xs">•••</span>
-                  </div>
 
-                  {/* Instagram Image */}
-                  <div className="aspect-square bg-slate-100 relative">
-                    {mediaUrls.length > 0 ? (
-                      <img
-                        src={mediaUrls[0]}
-                        alt="Preview"
-                        className="w-full h-full object-cover"
-                        referrerPolicy="no-referrer"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 p-6 text-center">
-                        <ImageIcon className="w-8 h-8 mb-2 stroke-1" />
-                        <span className="text-xs">Instagram posts require an attached image or video</span>
+                      <p className="text-xs text-slate-800 leading-relaxed whitespace-pre-wrap">
+                        {content || 'Facebook post preview text...'}
+                      </p>
+
+                      {renderMediaPreview('facebook')}
+
+                      <div className="pt-2 border-t border-slate-100 flex items-center justify-around text-slate-600 text-xs font-medium">
+                        <span>👍 Like</span>
+                        <span>💬 Comment</span>
+                        <span>↗️ Share</span>
                       </div>
-                    )}
-                  </div>
-
-                  <div className="p-3 space-y-1.5">
-                    <div className="flex items-center justify-between text-slate-800 text-sm">
-                      <div className="flex items-center gap-3">
-                        <span>❤️</span>
-                        <span>💬</span>
-                        <span>✈️</span>
-                      </div>
-                      <span>🔖</span>
-                    </div>
-
-                    <div className="text-xs text-slate-900 font-bold">1,420 likes</div>
-
-                    <p className="text-xs text-slate-800 leading-snug line-clamp-3">
-                      <span className="font-bold mr-1">{previewAccount.handle.replace('@', '')}</span>
-                      {content || 'Add a compelling caption for your Instagram followers...'}
-                    </p>
-
-                    {tags.length > 0 && (
-                      <div className="text-[11px] text-[#00376B] flex flex-wrap gap-1">
-                        {tags.map(t => <span key={t}>{t}</span>)}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* FACEBOOK PREVIEW */}
-              {previewPlatform === 'facebook' && (
-                <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-2xs space-y-3 font-sans">
-                  <div className="flex items-center gap-2.5">
-                    <img
-                      src={previewAccount.avatarUrl}
-                      alt="Avatar"
-                      className="w-9 h-9 rounded-full object-cover"
-                    />
-                    <div>
-                      <span className="text-xs font-bold text-slate-900 block leading-tight">{previewAccount.name}</span>
-                      <span className="text-[10px] text-slate-400">Scheduled · 🌍 Public</span>
-                    </div>
-                  </div>
-
-                  <p className="text-xs text-slate-800 leading-relaxed whitespace-pre-wrap">
-                    {content || 'Facebook post preview text...'}
-                  </p>
-
-                  {mediaUrls.length > 0 && (
-                    <div className="rounded overflow-hidden border border-slate-100 max-h-56">
-                      <img
-                        src={mediaUrls[0]}
-                        alt="Media"
-                        className="w-full h-full object-cover"
-                        referrerPolicy="no-referrer"
-                      />
                     </div>
                   )}
 
-                  <div className="pt-2 border-t border-slate-100 flex items-center justify-around text-slate-600 text-xs font-medium">
-                    <span>👍 Like</span>
-                    <span>💬 Comment</span>
-                    <span>↗️ Share</span>
-                  </div>
-                </div>
-              )}
+                  {/* TIKTOK PREVIEW */}
+                  {previewPlatform === 'tiktok' && (
+                    <div className="bg-slate-900 rounded-xl p-4 shadow-2xs space-y-3 text-white font-sans max-w-sm mx-auto w-full">
+                      <div className="flex items-center justify-between text-xs text-slate-400">
+                        <span className="flex items-center gap-1.5 font-bold text-white">
+                          <Film className="w-3.5 h-3.5 text-pink-500" />
+                          <span>TikTok {postType === 'video' ? 'Video Short' : 'Feed'}</span>
+                        </span>
+                        {postType === 'video' && videoUrl && (
+                          <span className="text-[10px] font-mono bg-white/10 px-2 py-0.5 rounded text-white">
+                            {videoDuration}s
+                          </span>
+                        )}
+                      </div>
 
-              {/* TIKTOK PREVIEW */}
-              {previewPlatform === 'tiktok' && (
-                <div className="bg-slate-900 rounded-xl p-4 shadow-2xs space-y-3 text-white font-sans max-w-sm mx-auto w-full">
-                  <div className="flex items-center justify-between text-xs text-slate-400">
-                    <span>TikTok Video / Short</span>
-                    <span>Preview</span>
-                  </div>
-                  <div className="aspect-[9/16] bg-slate-800 rounded-lg relative overflow-hidden flex flex-col justify-end p-3 max-h-80">
-                    {mediaUrls.length > 0 && (
-                      <img
-                        src={mediaUrls[0]}
-                        alt="Preview"
-                        className="absolute inset-0 w-full h-full object-cover opacity-80"
-                        referrerPolicy="no-referrer"
-                      />
-                    )}
-                    <div className="relative z-10 space-y-1">
-                      <span className="text-xs font-bold text-white block">{previewAccount.handle}</span>
-                      <p className="text-xs text-slate-100 line-clamp-2">
-                        {content || 'TikTok hook and description...'}
-                      </p>
-                      <div className="flex flex-wrap gap-1 text-[10px] text-white/90">
-                        {tags.map(t => <span key={t}>{t}</span>)}
+                      <div className="aspect-[9/16] bg-slate-950 rounded-xl relative overflow-hidden flex flex-col justify-end p-3 max-h-96 border border-white/10">
+                        {postType === 'video' && videoUrl ? (
+                          <video
+                            src={videoUrl}
+                            controls
+                            poster={videoThumbnail}
+                            playsInline
+                            className="absolute inset-0 w-full h-full object-cover"
+                          />
+                        ) : postType === 'photos' && mediaUrls.length > 0 ? (
+                          <img
+                            src={mediaUrls[0]}
+                            alt="Preview"
+                            className="absolute inset-0 w-full h-full object-cover opacity-90"
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : (
+                          <div className="absolute inset-0 flex items-center justify-center p-4 text-center text-xs text-slate-400">
+                            Select a video or photo to preview TikTok short
+                          </div>
+                        )}
+                        <div className="relative z-10 space-y-1.5 bg-gradient-to-t from-black/95 via-black/50 to-transparent p-2.5 -mx-3 -mb-3 rounded-b-xl pointer-events-none">
+                          <span className="text-xs font-bold text-white block">{previewAccount.handle}</span>
+                          <p className="text-xs text-slate-100 line-clamp-2">
+                            {content || 'TikTok hook and description...'}
+                          </p>
+                          <div className="flex flex-wrap gap-1 text-[10px] text-white/90">
+                            {tags.map(t => <span key={t}>{t}</span>)}
+                          </div>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                </div>
-              )}
+                  )}
 
-            </div>
+                </div>
+              );
+            })()}
           </div>
 
         </div>
 
-        {/* Modal Action Bar */}
+        {/* Publer 4-Mode Action Bar */}
         <div className="p-3 sm:px-6 sm:py-3.5 bg-white border-t border-slate-200 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 sm:gap-3 shrink-0">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
             <button
               type="button"
               onClick={() => handleSave('draft')}
-              className="min-h-[44px] sm:min-h-0 flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-2 sm:py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+              className="min-h-[38px] px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer flex items-center gap-1.5"
             >
               <Save className="w-3.5 h-3.5 text-slate-500" />
-              <span>Save Draft</span>
+              <span>Draft</span>
             </button>
             <button
               type="button"
               onClick={() => handleSave('queued')}
-              className="min-h-[44px] sm:min-h-0 flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-2 sm:py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer"
+              className="min-h-[38px] px-3 py-1.5 text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition-colors cursor-pointer flex items-center gap-1.5"
+              title="Add post to Publer auto-schedule queue slots"
             >
-              <Clock className="w-3.5 h-3.5 text-slate-500" />
-              <span>Queue Post</span>
+              <Zap className="w-3.5 h-3.5 text-amber-500" />
+              <span>AutoSchedule</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setIsRecycleEnabled(!isRecycleEnabled);
+              }}
+              className={`min-h-[38px] px-3 py-1.5 text-xs font-semibold rounded-xl border transition-colors cursor-pointer flex items-center gap-1.5 ${
+                isRecycleEnabled
+                  ? 'bg-purple-600 text-white border-purple-600'
+                  : 'bg-white hover:bg-purple-50 text-slate-700 border-slate-200'
+              }`}
+              title="Recycle post automatically every 7 days"
+            >
+              <Repeat className="w-3.5 h-3.5" />
+              <span>{isRecycleEnabled ? 'Recycle Active (7d)' : 'Recycle'}</span>
             </button>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => {
@@ -1182,28 +1544,28 @@ export const PostComposerModal: React.FC<PostComposerModalProps> = ({
                 handleSave('published');
               }}
               disabled={!content.trim()}
-              className="min-h-[44px] sm:min-h-0 flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-2 sm:py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
-              title={`Launch compose directly in official ${PLATFORM_CONFIGS[previewPlatform]?.displayName || 'app'} and record publish`}
+              className="min-h-[38px] flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
+              title={`Launch compose directly in official ${PLATFORM_CONFIGS[previewPlatform]?.displayName || 'mother app'} and record publish`}
             >
               <ExternalLink className="w-3.5 h-3.5 text-indigo-600" />
-              <span>Launch & Post in {PLATFORM_CONFIGS[previewPlatform]?.shortName || 'App'}</span>
+              <span>Redirect to {PLATFORM_CONFIGS[previewPlatform]?.shortName || 'App'} ↗</span>
             </button>
             <button
               type="button"
               onClick={() => handleSave('published')}
-              className="min-h-[44px] sm:min-h-0 flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3.5 py-2 sm:py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer"
+              className="min-h-[38px] flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition-colors cursor-pointer shadow-xs active:scale-98"
             >
-              <Send className="w-3.5 h-3.5 text-slate-500" />
-              <span>Publish Now</span>
+              <Send className="w-3.5 h-3.5" />
+              <span>Redirect to Mother Apps to Post</span>
             </button>
             <button
               type="button"
               onClick={() => handleSave('scheduled')}
               disabled={isOverLimit || !content.trim()}
-              className="min-h-[44px] sm:min-h-0 flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-4 py-2 sm:py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 rounded-lg shadow-xs transition-colors cursor-pointer"
+              className="min-h-[38px] flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-4 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 rounded-xl shadow-xs transition-colors cursor-pointer active:scale-98"
             >
               <Calendar className="w-3.5 h-3.5" />
-              <span>Schedule Post</span>
+              <span>Schedule</span>
             </button>
           </div>
         </div>

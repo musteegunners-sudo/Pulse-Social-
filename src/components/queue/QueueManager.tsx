@@ -11,7 +11,11 @@ import {
   FileEdit,
   Send,
   Calendar,
-  AlertCircle
+  AlertCircle,
+  Video,
+  Image as ImageIcon,
+  Type,
+  Film
 } from 'lucide-react';
 import { QueueSlot, SocialPost, SocialPlatform } from '../../types';
 import { PlatformIcon, getPlatformName } from '../common/PlatformIcon';
@@ -43,8 +47,20 @@ export const QueueManager: React.FC<QueueManagerProps> = ({
   const [newSlotTime, setNewSlotTime] = useState('14:00');
   const [newSlotPlatforms, setNewSlotPlatforms] = useState<SocialPlatform[]>(['twitter', 'linkedin']);
 
-  // Queued posts (upcoming or queued status)
-  const queuedPosts = posts.filter(p => p.status === 'queued' || p.status === 'scheduled');
+  const [postTypeFilter, setPostTypeFilter] = useState<'all' | 'video' | 'photos' | 'text'>('all');
+
+  // Queued posts (upcoming or queued status) with post type filtering
+  const allQueuedPosts = posts.filter(p => p.status === 'queued' || p.status === 'scheduled');
+  
+  const videoCount = allQueuedPosts.filter(p => (p.postType === 'video' || p.videoUrl)).length;
+  const photosCount = allQueuedPosts.filter(p => (p.postType === 'photos' || (!p.videoUrl && p.mediaUrls && p.mediaUrls.length > 0))).length;
+  const textCount = allQueuedPosts.filter(p => (p.postType === 'text' || (!p.videoUrl && (!p.mediaUrls || p.mediaUrls.length === 0)))).length;
+
+  const queuedPosts = allQueuedPosts.filter(p => {
+    if (postTypeFilter === 'all') return true;
+    const pType = p.postType || (p.videoUrl ? 'video' : (p.mediaUrls && p.mediaUrls.length > 0 ? 'photos' : 'text'));
+    return pType === postTypeFilter;
+  });
 
   const toggleSlot = (id: string) => {
     const updated = queueSlots.map(s => s.id === id ? { ...s, isEnabled: !s.isEnabled } : s);
@@ -211,6 +227,32 @@ export const QueueManager: React.FC<QueueManagerProps> = ({
             </button>
           </div>
 
+          {/* Post Type Filter Bar */}
+          <div className="px-4 sm:px-5 py-2 bg-slate-50/70 border-b border-slate-200 flex items-center gap-1.5 overflow-x-auto text-xs">
+            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider shrink-0 mr-1">
+              Format:
+            </span>
+            {[
+              { id: 'all' as const, label: `All (${allQueuedPosts.length})` },
+              { id: 'video' as const, label: `🎬 Video (${videoCount})` },
+              { id: 'photos' as const, label: `🖼️ Photos (${photosCount})` },
+              { id: 'text' as const, label: `📝 Text (${textCount})` },
+            ].map(tab => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setPostTypeFilter(tab.id)}
+                className={`px-2.5 py-1 rounded-md text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+                  postTypeFilter === tab.id
+                    ? 'bg-indigo-600 text-white shadow-2xs'
+                    : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
           {queuedPosts.length === 0 ? (
             <div className="p-12 text-center space-y-2">
               <Layers className="w-8 h-8 text-slate-300 mx-auto" />
@@ -236,19 +278,53 @@ export const QueueManager: React.FC<QueueManagerProps> = ({
                         {idx + 1}
                       </span>
 
-                      {post.mediaUrls && post.mediaUrls[0] && (
-                        <div className="w-12 h-12 sm:w-14 sm:h-14 rounded overflow-hidden bg-slate-100 shrink-0 border border-slate-200">
+                      {/* Thumbnail: Video, Photo, or Text icon */}
+                      {post.postType === 'video' || post.videoUrl ? (
+                        <div className="relative w-12 h-12 sm:w-14 sm:h-14 rounded-lg overflow-hidden bg-slate-900 shrink-0 border border-slate-200">
+                          {post.videoThumbnail || (post.mediaUrls && post.mediaUrls[0]) ? (
+                            <img
+                              src={post.videoThumbnail || post.mediaUrls![0]}
+                              alt="Video Thumbnail"
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center bg-slate-900">
+                              <Film className="w-5 h-5 text-indigo-400" />
+                            </div>
+                          )}
+                          <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                            <div className="w-5 h-5 rounded-full bg-white/90 text-indigo-600 flex items-center justify-center shadow-xs">
+                              <Play className="w-2.5 h-2.5 fill-indigo-600 ml-0.5" />
+                            </div>
+                          </div>
+                          {post.videoDuration && (
+                            <span className="absolute bottom-0.5 right-0.5 bg-black/80 text-white text-[8px] font-mono px-1 rounded">
+                              0:{post.videoDuration < 10 ? `0${post.videoDuration}` : post.videoDuration}
+                            </span>
+                          )}
+                        </div>
+                      ) : post.mediaUrls && post.mediaUrls[0] ? (
+                        <div className="relative w-12 h-12 sm:w-14 sm:h-14 rounded-lg overflow-hidden bg-slate-100 shrink-0 border border-slate-200">
                           <img
                             src={post.mediaUrls[0]}
                             alt="Media"
                             className="w-full h-full object-cover"
                             referrerPolicy="no-referrer"
                           />
+                          {post.mediaUrls.length > 1 && (
+                            <span className="absolute bottom-0.5 right-0.5 bg-black/75 text-white text-[8px] font-bold px-1 rounded">
+                              +{post.mediaUrls.length}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-lg bg-slate-100 border border-slate-200 shrink-0 flex items-center justify-center text-slate-400">
+                          <Type className="w-5 h-5 text-slate-400" />
                         </div>
                       )}
 
                       <div className="space-y-1 flex-1 min-w-0">
-                        <div className="flex items-center gap-2 text-xs text-slate-500">
+                        <div className="flex items-center gap-2 text-xs text-slate-500 flex-wrap">
                           <div className="flex items-center gap-1">
                             {post.platforms.map(p => (
                               <PlatformIcon key={p} platform={p} size={12} />
@@ -257,6 +333,26 @@ export const QueueManager: React.FC<QueueManagerProps> = ({
                           <span aria-hidden="true">·</span>
                           <span className="font-mono tabular-nums text-[11px]">
                             {dateObj.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })} at {dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+
+                          {/* Format Badge */}
+                          <span className="ml-auto sm:ml-0">
+                            {post.postType === 'video' || post.videoUrl ? (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.2 bg-purple-50 text-purple-700 border border-purple-200 rounded text-[10px] font-bold">
+                                <Video className="w-3 h-3 text-purple-600" />
+                                <span>Video</span>
+                              </span>
+                            ) : post.mediaUrls && post.mediaUrls.length > 0 ? (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.2 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded text-[10px] font-bold">
+                                <ImageIcon className="w-3 h-3 text-indigo-600" />
+                                <span>{post.mediaUrls.length > 1 ? `${post.mediaUrls.length} Photos` : 'Photo'}</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.2 bg-slate-100 text-slate-700 border border-slate-200 rounded text-[10px] font-bold">
+                                <Type className="w-3 h-3 text-slate-500" />
+                                <span>Text Post</span>
+                              </span>
+                            )}
                           </span>
                         </div>
 

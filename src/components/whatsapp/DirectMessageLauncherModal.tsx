@@ -155,7 +155,7 @@ export const DirectMessageLauncherModal: React.FC<DirectMessageLauncherModalProp
                 type="tel"
                 value={phoneNumberInput}
                 onChange={(e) => setPhoneNumberInput(e.target.value)}
-                placeholder="e.g. 555 019 2831"
+                placeholder="e.g. 812 345 6789"
                 className="flex-1 px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white text-slate-900 font-mono"
               />
             </div>
